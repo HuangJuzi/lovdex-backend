@@ -111,6 +111,15 @@ curl http://localhost:<SERVER_PORT>/health
 
 - **WS 路径**：固定 `/ws`，与 HTTP server 同进程升级（`ws.WebSocketServer({server})`）。跨域前端直连 `ws(s)://<host>:<SERVER_PORT>/ws`。
 - **REST 信封**：成功 `{ success: true, data: T }`；错误 `{ success: false, error: { code, message, details? } }`。建议读取 `body?.data ?? body`。
+
+  ```jsonc
+  // 成功
+  { "success": true, "data": { "sessionId": "6f1e…", "provider": "claude", "projectPath": "/repo" } }
+  // 错误（经 AppError → error 中间件）
+  { "success": false, "error": { "code": "SESSION_NOT_FOUND", "message": "Session not found." } }
+  ```
+
+  > 注意：`server/index.js` 里少数文件系统端点（`/api/browse-filesystem`、`/api/create-folder`、`/api/projects/:id/file*`）走的是裸 `{ error: "..." }` 形态、不带 `success` 字段——这正是建议统一用 `body?.data ?? body` 读取的原因。
 - **sessionId 语义**：全程使用 **app 侧 sessionId**；provider 原生 sessionId（Claude uuid / Codex thread-id）不外泄，仅后端 DB 内映射。
 - **CORS**：由 `CORS_ORIGIN` 控制（见上）。`Authorization`、`Content-Type` 头默认放行；响应暴露 `X-Refreshed-Token` 头供 token 刷新。
 
@@ -138,6 +147,25 @@ JSON，按 `type` 路由（`chat-websocket.service.ts`）。
 | `chat.permission-response` | `requestId` · `allow`(bool) · `updatedInput`? · `message`? · `rememberEntry`? | 调 `resolveToolApproval`（仅 Claude 有交互式审批） |
 
 非法入站 → `protocol_error` 帧，code ∈ `UNKNOWN_MESSAGE_TYPE / SESSION_ID_REQUIRED / SESSION_NOT_FOUND / UNSUPPORTED_PROVIDER / RUN_IN_PROGRESS / NO_ACTIVE_RUN / INTERNAL_ERROR`。
+
+**入站帧示例**：
+
+```jsonc
+// 发起一轮对话（开启逐 token 流式）
+{ "type": "chat.send", "sessionId": "6f1e…", "content": "重构这个文件",
+  "options": { "model": "sonnet", "effort": "high", "permissionMode": "default",
+               "includePartialMessages": true } }
+
+// 打断当前运行
+{ "type": "chat.abort", "sessionId": "6f1e…" }
+
+// 重连后订阅若干会话，带各自已读 seq 以便增量重放
+{ "type": "chat.subscribe", "sessions": [ { "sessionId": "6f1e…", "lastSeq": 42 } ] }
+
+// 回应工具审批请求（仅 Claude）
+{ "type": "chat.permission-response", "requestId": "req_ab12",
+  "allow": true, "rememberEntry": { "toolName": "Bash", "scope": "session" } }
+```
 
 ## WebSocket 出站帧（服务端 → 客户端）
 
@@ -210,6 +238,32 @@ JSON，按 `kind` 区分。每条 live 帧由 `decorateAndRecordEvent` 分配单
   isError?: boolean;
   // ...开放扩展 [key: string]: unknown
 }
+```
+
+**出站帧示例**（一轮带流式的回复，seq 单调递增）：
+
+```jsonc
+{ "kind": "status",       "sessionId": "6f1e…", "seq": 43, "status": "running" }
+{ "kind": "stream_delta", "sessionId": "6f1e…", "seq": 44, "content": "我先读取" }
+{ "kind": "stream_delta", "sessionId": "6f1e…", "seq": 45, "content": "这个文件…" }
+{ "kind": "stream_end",   "sessionId": "6f1e…", "seq": 46 }
+{ "kind": "text",         "sessionId": "6f1e…", "seq": 47, "role": "assistant",
+  "content": "我先读取这个文件…" }              // 持久化权威文本，替换 streaming bubble
+{ "kind": "tool_use",     "sessionId": "6f1e…", "seq": 48, "toolName": "Read",
+  "toolId": "tu_01", "toolInput": { "file_path": "/repo/src/a.ts" } }
+{ "kind": "tool_result",  "sessionId": "6f1e…", "seq": 49, "toolId": "tu_01",
+  "isError": false, "content": "…文件内容…" }
+{ "kind": "complete",     "sessionId": "6f1e…", "seq": 50,
+  "exitCode": 0, "success": true, "aborted": false, "actualSessionId": "6f1e…" }
+```
+
+工具审批往返（仅 Claude，`chat.send` 未跳过权限时）：
+
+```jsonc
+// 出站：服务端请求审批
+{ "kind": "permission_request", "sessionId": "6f1e…", "seq": 51,
+  "requestId": "req_ab12", "toolName": "Bash", "input": { "command": "rm -rf build" } }
+// 入站：客户端回应（见上方 chat.permission-response）
 ```
 
 ## REST 路由
@@ -370,16 +424,60 @@ sessions-watcher.service.ts:245-290  (initializeSessionsWatcher)
 
 ## 接入示例（第三方 / 业务）
 
-```bash
-# 1) 健康检查
-curl http://localhost:3001/health
+### REST 常用调用
 
-# 2) 创建会话
+```bash
+# 1) 健康检查（无鉴权）
+curl http://localhost:3001/health
+# {"status":"ok","timestamp":"...","installMode":"npm","version":"1.0.0"}
+
+# 2) 创建会话 → 拿到 app 侧 sessionId（发首条消息前必须先调）
 curl -X POST http://localhost:3001/api/providers/sessions \
   -H 'Content-Type: application/json' \
   -d '{"provider":"claude","projectPath":"/path/to/project"}'
+# 201 {"success":true,"data":{"sessionId":"6f1e…","provider":"claude","projectPath":"/path/to/project"}}
 
-# 3) 流式对话（WebSocket）
+# 3) 项目列表（含各自 sessions；skipSync=1 跳过磁盘同步以求快）
+curl 'http://localhost:3001/api/projects?skipSync=1&sessionsLimit=20'
+
+# 4) 拉取会话历史消息（分页；不传 limit=全量）
+curl 'http://localhost:3001/api/providers/claude/sessions/6f1e…/messages?limit=50&offset=0'
+# {"success":true,"data":{"messages":[{kind,role,content,...}],"total":128,"hasMore":true,"offset":0}}
+
+# 5) 模型列表（Claude 不缓存，Codex TTL 3 天；bypassCache=1 强刷）
+curl 'http://localhost:3001/api/providers/codex/models?bypassCache=1'
+# {"success":true,"data":{"provider":"codex","models":[...],"cache":{...}}}
+
+# 6) 新增 / 更新一个 MCP 服务器（upsert）
+curl -X POST http://localhost:3001/api/providers/claude/mcp/servers \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"filesystem","transport":"stdio","scope":"user",
+       "command":"npx","args":["-y","@modelcontextprotocol/server-filesystem","/repo"]}'
+# 201 {"success":true,"data":{"server":{...}}}
+
+# 7) 重命名会话（summary ≤ 500 字符，同时回写 provider 磁盘）
+curl -X PUT http://localhost:3001/api/providers/sessions/6f1e… \
+  -H 'Content-Type: application/json' -d '{"summary":"重构 auth 模块"}'
+```
+
+### SSE 端点（会话全文搜索）
+
+```bash
+# event: result / progress / done / error 依次推送
+curl -N 'http://localhost:3001/api/providers/search/sessions?q=refactor&limit=50'
+# event: result
+# data: {"projectResult":{...},"totalMatches":3,"scannedProjects":1,"totalProjects":4}
+# event: progress
+# data: {"totalMatches":3,"scannedProjects":2,"totalProjects":4}
+# event: done
+# data: {}
+```
+
+> 其余 SSE 端点：`GET /api/projects/clone-progress`（Git 克隆进度，event ∈ progress/complete/error）。
+
+### 流式对话（WebSocket）
+
+```bash
 #    连 ws://localhost:3001/ws，发：
 #    {"type":"chat.send","sessionId":"<id>","content":"hello",
 #     "options":{"model":"sonnet","includePartialMessages":true}}
@@ -387,4 +485,5 @@ curl -X POST http://localhost:3001/api/providers/sessions \
 #    不带 includePartialMessages 时：每 turn 结束只收一个完整 text 帧 → complete
 ```
 
+> 设置了 `API_KEY` 时，所有 `/api/*` 请求需加头 `-H 'x-api-key: <API_KEY>'`；WS 鉴权在本 OSS 构建为 no-op。
 > WS 流式协议的完整字段语义详见前端仓 `docs/streaming-api.md` / `docs/api-contract.html`。
