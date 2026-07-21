@@ -3,20 +3,46 @@
 Pure API + WebSocket backend extracted from `lovdex-product-os`. It does **not** serve any
 frontend bundle — point any frontend / business client at it over HTTP + WS.
 
+技术栈：**Node.js (ESM) + Express 4 + ws** · **TypeScript**（`tsx` 直跑源码 / `tsc` 编译到 `dist-server`）· **better-sqlite3**（持久化）· **chokidar**（磁盘监听）· **@anthropic-ai/claude-agent-sdk** + **@openai/codex-sdk**（两个 coding agent 后端）。
+
 ## Layout
 
 ```
 lovdex-backend/
-  server/            source (Express + WS + modules)
-  shared/            networkHosts.js (used by server/index.js)
-  dist-server/       build output (gitignored)
-  package.json
-  .env.example
+  server/
+    index.js                 入口：装配 Express + HTTP + WS，注册路由与 provider spawn
+    load-env.js              先于一切 import 加载 .env
+    claude-sdk.js            Claude Agent SDK 封装（queryClaudeSDK / abort / 工具审批）
+    openai-codex.js          Codex SDK 封装（queryCodex / abort）
+    cli.js                   CLI 入口
+    constants/               config.js（IS_PLATFORM 等运行时开关）
+    middleware/              auth.js（validateApiKey + no-op 鉴权，见下）
+    routes/                  commands.js · user.js（模块外的独立 REST 路由）
+    services/                notification-orchestrator.js（跨会话通知编排）
+    shared/                  types.ts · interfaces.ts · utils.ts · 图片附件/frontmatter 等共享工具
+    utils/                   runtime-paths.js · colors.js · commandParser.js …
+    modules/                 领域模块（各带 index.ts 作为公共出口）
+      database/              SQLite 初始化 + repositories/（sessions/projects/users/api-keys…）
+      projects/              projects.routes.ts + services/（clone/delete/star/taskmaster…）
+      providers/             provider.routes.ts + services/ + list/{claude,codex}/ + shared/{base,mcp,skills}
+      websocket/             WS server + chat 网关 + run registry + 鉴权/状态/写入 services
+      assets/                图片上传/读取
+  shared/                    networkHosts.js（server/index.js 用来推断可连接 host）
+  dist-server/               build 输出（gitignored）
+  package.json · .env.example
 ```
 
-The `server/` + `dist-server/` layout is preserved from the original repo so that
-`server/utils/runtime-paths.js` (which walks up to a `server` dir) and
-`server/tsconfig.json` (`rootDir: ".."`, `outDir: "../dist-server"`) work unchanged.
+**Provider 抽象**：`modules/providers/list/{claude,codex}/` 下每个 provider 实现同一组能力面
+（`*-sessions` / `*-models` / `*-mcp` / `*-skills` / `*-auth` / `*-session-synchronizer`），
+由 `modules/providers/shared/base` 统一编排，因此 claude 与 codex 在 REST/WS 层完全对称
+（路由中的 `:p ∈ {claude, codex}`）。SDK 细节被隔离在根部 `claude-sdk.js` / `openai-codex.js`。
+
+**架构约束**（`eslint-plugin-boundaries`）：`server/shared/*` 与 `server/modules/*` 被标为
+`shared` / `backend-module` 两类边界元素，模块间只应经各自 `index.ts` 公共出口互访。
+
+`server/` + `dist-server/` 双层布局沿用自原仓库，使
+`server/utils/runtime-paths.js`（向上找 `server` 目录）与
+`server/tsconfig.json`（`rootDir: ".."`, `outDir: "../dist-server"`）无需改动即可工作。
 
 ## Quick start
 
@@ -30,7 +56,15 @@ npm start                     # node dist-server/server/index.js
 Dev (with tsx, no build step):
 
 ```bash
-npm run dev
+npm run dev                   # tsx 直跑 server/index.js
+npm run dev:watch             # 同上，改动自动重启
+```
+
+Quality gates:
+
+```bash
+npm run typecheck             # tsc --noEmit
+npm run lint                  # eslint server/  (加 :fix 自动修复)
 ```
 
 ## Configuration (env)
