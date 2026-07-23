@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { executeModelsCommand } from '../commands.js';
+import { builtInCommands, executeModelsCommand } from '../commands.js';
 import { providerModelsService } from '../../modules/providers/services/provider-models.service.js';
 
 test('models command returns available models only for the active provider', async () => {
@@ -79,4 +79,14 @@ test('models command falls back to claude for unsupported providers', async () =
     providerModelsService.getProviderModels = originalGetProviderModels;
     providerModelsService.getCurrentActiveModel = originalGetCurrentActiveModel;
   }
+});
+
+test('built-in commands include /resume as a ui-overlay command', () => {
+  const resume = builtInCommands.find((cmd) => cmd.name === '/resume');
+  assert.ok(resume, '/resume should be a built-in command');
+  assert.equal(resume.namespace, 'builtin');
+  assert.equal(resume.metadata?.type, 'builtin');
+  assert.equal(resume.metadata?.handler, 'ui-overlay');
+  assert.equal(resume.metadata?.overlay, 'resume');
+  assert.equal(resume.metadata?.forwardToProvider, undefined);
 });

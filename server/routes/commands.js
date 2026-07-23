@@ -156,7 +156,7 @@ async function scanCommandsDirectory(dir, baseDir, namespace) {
 /**
  * Built-in commands that are always available
  */
-const builtInCommands = [
+export const builtInCommands = [
   {
     name: "/help",
     description: "Show help documentation for Claude Code",
@@ -204,6 +204,12 @@ const builtInCommands = [
     description: "Show system status and version information",
     namespace: "builtin",
     metadata: { type: "builtin" },
+  },
+  {
+    name: "/resume",
+    description: "Resume an earlier conversation (opens a session picker)",
+    namespace: "builtin",
+    metadata: { type: "builtin", handler: "ui-overlay", overlay: "resume" },
   },
 ];
 
