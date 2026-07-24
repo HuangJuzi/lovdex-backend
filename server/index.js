@@ -28,6 +28,7 @@ import {
     abortCodexSession,
 } from './openai-codex.js';
 import commandsRoutes from './routes/commands.js';
+import sessionsRoutes from './routes/sessions.js';
 import projectModuleRoutes from './modules/projects/projects.routes.js';
 import userRoutes from './routes/user.js';
 import providerRoutes from './modules/providers/provider.routes.js';
@@ -149,6 +150,9 @@ app.use('/api/assets', authenticateToken, assetsRoutes);
 
 // Commands API Routes (protected)
 app.use('/api/commands', authenticateToken, commandsRoutes);
+
+// Session fork/rewind API Routes (protected)
+app.use('/api/sessions', authenticateToken, sessionsRoutes);
 
 // User API Routes (protected)
 app.use('/api/user', authenticateToken, userRoutes);
