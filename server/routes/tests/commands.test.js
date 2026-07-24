@@ -90,3 +90,12 @@ test('built-in commands include /resume as a ui-overlay command', () => {
   assert.equal(resume.metadata?.overlay, 'resume');
   assert.equal(resume.metadata?.forwardToProvider, undefined);
 });
+
+test('branch/fork/rewind are registered as ui-overlay commands', () => {
+  for (const name of ['/branch', '/fork', '/rewind']) {
+    const cmd = builtInCommands.find((c) => c.name === name);
+    assert.ok(cmd, `${name} not registered`);
+    assert.equal(cmd.metadata.handler, 'ui-overlay');
+    assert.ok(cmd.metadata.overlay, `${name} missing overlay`);
+  }
+});

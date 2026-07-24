@@ -211,6 +211,24 @@ export const builtInCommands = [
     namespace: "builtin",
     metadata: { type: "builtin", handler: "ui-overlay", overlay: "resume" },
   },
+  {
+    name: "/branch",
+    description: "Branch this conversation from a chosen turn",
+    namespace: "builtin",
+    metadata: { type: "builtin", handler: "ui-overlay", overlay: "branch" },
+  },
+  {
+    name: "/fork",
+    description: "Fork this conversation into a new session",
+    namespace: "builtin",
+    metadata: { type: "builtin", handler: "ui-overlay", overlay: "fork" },
+  },
+  {
+    name: "/rewind",
+    description: "Rewind code and conversation to a chosen turn",
+    namespace: "builtin",
+    metadata: { type: "builtin", handler: "ui-overlay", overlay: "rewind" },
+  },
 ];
 
 /**
