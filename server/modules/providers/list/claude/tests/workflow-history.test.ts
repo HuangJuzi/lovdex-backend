@@ -7,7 +7,10 @@ import test from 'node:test';
 import { closeConnection } from '@/modules/database/connection.js';
 import { initializeDatabase } from '@/modules/database/init-db.js';
 import { sessionsDb } from '@/modules/database/repositories/sessions.db.js';
-import { ClaudeSessionsProvider } from '@/modules/providers/list/claude/claude-sessions.provider.js';
+import {
+  aggregateWorkflowState,
+  ClaudeSessionsProvider,
+} from '@/modules/providers/list/claude/claude-sessions.provider.js';
 
 const provider = new ClaudeSessionsProvider();
 const SID = 'sess-1';
@@ -15,7 +18,7 @@ const SID = 'sess-1';
 // A single Workflow run captured in one JSONL stream: the Workflow tool_use,
 // the SDK task_started/task_progress/task_notification system events, a
 // tool_progress leaf, and the WorkflowOutput tool_result.
-const WORKFLOW_RECORDS: Array<Record<string, any>> = [
+const WORKFLOW_RECORDS: Array<Record<string, unknown>> = [
   {
     type: 'tool_use', toolName: 'Workflow', toolInput: { script: 'x' }, toolCallId: 'TU_root',
     sessionId: SID, uuid: 'a1', timestamp: '2026-08-05T00:00:00.000Z',
@@ -53,8 +56,8 @@ const WORKFLOW_RECORDS: Array<Record<string, any>> = [
 ];
 
 // ── Contract test: the aggregation shape ────────────────────────────────
-// aggregateWorkflowState below mirrors the aggregation fetchHistory performs
-// (Step 3 of this task). If fetchHistory's aggregation changes, update both.
+// Exercises the production aggregateWorkflowState (the exact function
+// fetchHistory calls) directly, independent of the DB-backed reader.
 test('workflow events aggregate into a workflowState on the Workflow tool_use', () => {
   const normalized = WORKFLOW_RECORDS.flatMap((r) => provider.normalizeMessage(r, SID));
   assert.ok(
@@ -141,65 +144,3 @@ test('fetchHistory aggregates workflowState onto the Workflow tool_use (real JSO
     }
   });
 });
-
-// ── The aggregation under test (mirror of fetchHistory Step 3 impl) ──
-function aggregateWorkflowState(msgs: any[]): any[] {
-  const startedByToolUseId = new Map<string, any>();
-  const progressByTaskId = new Map<string, any[]>();
-  const toolProgressByTaskId = new Map<string, any[]>();
-  const notifByTaskId = new Map<string, any>();
-  const toolResultByToolId = new Map<string, any>();
-  for (const m of msgs) {
-    if (m.kind === 'task_started' && m.toolUseId) startedByToolUseId.set(m.toolUseId, m);
-    if (m.kind === 'task_progress') {
-      const arr = progressByTaskId.get(m.taskId) ?? [];
-      arr.push(m);
-      progressByTaskId.set(m.taskId, arr);
-    }
-    if (m.kind === 'tool_progress' && m.taskId) {
-      const arr = toolProgressByTaskId.get(m.taskId) ?? [];
-      arr.push(m);
-      toolProgressByTaskId.set(m.taskId, arr);
-    }
-    if (m.kind === 'task_notification') notifByTaskId.set(m.taskId, m);
-    if (m.kind === 'tool_result' && m.toolId) {
-      if (!toolResultByToolId.has(m.toolId)) toolResultByToolId.set(m.toolId, m);
-    }
-  }
-  for (const m of msgs) {
-    if (m.kind === 'tool_use' && m.toolName === 'Workflow') {
-      const started = m.toolId ? startedByToolUseId.get(m.toolId) : undefined;
-      const taskId = started?.taskId;
-      if (!taskId) continue;
-      const progress = progressByTaskId.get(taskId) ?? [];
-      const tools = toolProgressByTaskId.get(taskId) ?? [];
-      const notif = notifByTaskId.get(taskId);
-      const toolResult = m.toolId ? toolResultByToolId.get(m.toolId) : undefined;
-      m.workflowState = {
-        status: notif?.status ?? 'running',
-        workflowName: started?.workflowName,
-        agents: progress.map((p) => ({
-          taskId: p.taskId,
-          description: p.description,
-          lastToolName: p.lastToolName,
-          usage: p.usage,
-          tools: tools.map((t) => ({
-            toolUseId: t.toolUseId,
-            toolName: t.toolName,
-            elapsedTimeSeconds: t.elapsedTimeSeconds,
-          })),
-        })),
-        notification: notif ? { status: notif.status, summary: notif.summary, usage: notif.usage } : undefined,
-      };
-      // Hoist WorkflowOutput fields from the matching tool_result so the
-      // Workflow tool_use is self-contained for re-run/resume buttons.
-      if (toolResult) {
-        m.runId = toolResult.runId ?? undefined;
-        m.scriptPath = toolResult.scriptPath ?? undefined;
-        m.transcriptDir = toolResult.transcriptDir ?? undefined;
-        m.summary = toolResult.summary ?? undefined;
-      }
-    }
-  }
-  return msgs;
-}
