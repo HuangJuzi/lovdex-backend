@@ -331,6 +331,95 @@ export class ClaudeSessionsProvider implements IProviderSessions {
     const ts = raw.timestamp || new Date().toISOString();
     const baseId = raw.uuid || generateMessageId('claude');
 
+    // ── Workflow / background-task system events ─────────────────────────
+    // SDK emits these as { type:'system', subtype:'task_*' } plus the non-system
+    // { type:'tool_progress' }. Mirror them as their own kinds so the frontend
+    // can aggregate a Workflow progress tree. See
+    // docs/superpowers/specs/2026-08-05-workflow-adaptation-design.md §2.
+    if (raw.type === 'system') {
+      const subtype = raw.subtype;
+      if (subtype === 'task_started') {
+        return [createNormalizedMessage({
+          id: raw.uuid || baseId,
+          sessionId,
+          timestamp: ts,
+          provider: PROVIDER,
+          kind: 'task_started',
+          taskId: raw.task_id,
+          toolUseId: raw.tool_use_id ?? null,
+          taskType: raw.task_type ?? null,
+          workflowName: raw.workflow_name ?? null,
+          subagentType: raw.subagent_type ?? null,
+          description: raw.description ?? '',
+          skipTranscript: raw.skip_transcript ?? false,
+        })];
+      }
+      if (subtype === 'task_progress') {
+        return [createNormalizedMessage({
+          id: raw.uuid || baseId,
+          sessionId,
+          timestamp: ts,
+          provider: PROVIDER,
+          kind: 'task_progress',
+          taskId: raw.task_id,
+          toolUseId: raw.tool_use_id ?? null,
+          description: raw.description ?? '',
+          usage: raw.usage ?? null,
+          lastToolName: raw.last_tool_name ?? null,
+          summary: raw.summary ?? null,
+        })];
+      }
+      if (subtype === 'task_notification') {
+        return [createNormalizedMessage({
+          id: raw.uuid || baseId,
+          sessionId,
+          timestamp: ts,
+          provider: PROVIDER,
+          kind: 'task_notification',
+          taskId: raw.task_id,
+          toolUseId: raw.tool_use_id ?? null,
+          status: raw.status,
+          summary: raw.summary ?? '',
+          usage: raw.usage ?? null,
+          outputFile: raw.output_file ?? null,
+        })];
+      }
+      if (subtype === 'background_tasks_changed') {
+        const tasks = Array.isArray(raw.tasks)
+          ? raw.tasks.map((t: AnyRecord) => ({
+              taskId: String(t.task_id),
+              taskType: String(t.task_type),
+              description: String(t.description ?? ''),
+            }))
+          : [];
+        return [createNormalizedMessage({
+          id: raw.uuid || baseId,
+          sessionId,
+          timestamp: ts,
+          provider: PROVIDER,
+          kind: 'background_tasks_changed',
+          tasks,
+        })];
+      }
+      // thinking_tokens / commands_changed / 其它 system 暂不处理。
+      return [];
+    }
+
+    if (raw.type === 'tool_progress') {
+      return [createNormalizedMessage({
+        id: raw.uuid || baseId,
+        sessionId,
+        timestamp: ts,
+        provider: PROVIDER,
+        kind: 'tool_progress',
+        toolUseId: raw.tool_use_id,
+        toolName: raw.tool_name,
+        parentToolUseId: raw.parent_tool_use_id ?? null,
+        taskId: raw.task_id ?? null,
+        elapsedTimeSeconds: raw.elapsed_time_seconds ?? 0,
+      })];
+    }
+
     if (raw.message?.role === 'user' && raw.message?.content && raw.isMeta !== true) {
       if (Array.isArray(raw.message.content)) {
         // Image attachments sent through the SDK are persisted as base64
@@ -530,6 +619,8 @@ export class ClaudeSessionsProvider implements IProviderSessions {
     }
 
     if (raw.type === 'tool_result') {
+      const tur = raw.toolUseResult as AnyRecord | undefined;
+      const isLocalWorkflow = tur?.taskType === 'local_workflow';
       messages.push(createNormalizedMessage({
         id: baseId,
         sessionId,
@@ -539,6 +630,14 @@ export class ClaudeSessionsProvider implements IProviderSessions {
         toolId: raw.toolCallId || '',
         content: raw.output || '',
         isError: false,
+        // Lift WorkflowOutput fields for local_workflow so the frontend card
+        // can offer re-run/resume without parsing toolUseResult.
+        taskId: isLocalWorkflow ? tur?.taskId : undefined,
+        taskType: isLocalWorkflow ? tur?.taskType : undefined,
+        workflowName: isLocalWorkflow ? tur?.workflowName : undefined,
+        runId: isLocalWorkflow ? tur?.runId : undefined,
+        scriptPath: isLocalWorkflow ? tur?.scriptPath : undefined,
+        transcriptDir: isLocalWorkflow ? tur?.transcriptDir : undefined,
       }));
       return messages;
     }
