@@ -287,6 +287,10 @@ export type NormalizedMessage = {
   transcriptDir?: string;
   /** tool_progress 的父链:指向 agent 的 tool_use_id(或 Workflow 根)。 */
   parentToolUseId?: string;
+  /** WorkflowOutput.status: 'async_launched' | 'remote_launched'。 */
+  workflowStatus?: 'async_launched' | 'remote_launched';
+  /** WorkflowOutput.sessionUrl(remote_launched 时 CCR 会话链接)。 */
+  sessionUrl?: string;
   /** background_tasks_changed 的 level payload(REPLACE 语义)。 */
   tasks?: Array<{ taskId: string; taskType: string; description: string }>;
   [key: string]: unknown;
