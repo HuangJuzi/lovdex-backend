@@ -266,6 +266,8 @@ export type NormalizedMessage = {
   newSessionId?: string;
   status?: string;
   summary?: string;
+  /** task_started/task_progress 的人类可读描述(如 'agent:Explore')。 */
+  description?: string;
   tokenBudget?: unknown;
   subagentTools?: unknown;
   toolUseResult?: unknown;
@@ -273,6 +275,8 @@ export type NormalizedMessage = {
   rowid?: number;
   /** Workflow / background task linkage (task_started/task_progress/tool_progress/task_notification). */
   taskId?: string;
+  /** task_started/tool_progress 等关联的根 tool_use id(Workflow 根或子 agent tool_use)。 */
+  toolUseId?: string;
   /** 'local_workflow' | 'remote_agent' | 其它 SDK task_type。 */
   taskType?: string;
   workflowName?: string;
@@ -293,6 +297,19 @@ export type NormalizedMessage = {
   sessionUrl?: string;
   /** background_tasks_changed 的 level payload(REPLACE 语义)。 */
   tasks?: Array<{ taskId: string; taskType: string; description: string }>;
+  /** Workflow 进度树聚合(由 fetchHistory 在历史回放时挂到 Workflow tool_use 上)。 */
+  workflowState?: {
+    status: string;
+    workflowName?: string | null;
+    agents: Array<{
+      taskId: string;
+      description: string;
+      lastToolName?: string | null;
+      usage?: unknown;
+      tools: Array<{ toolUseId: string; toolName: string; elapsedTimeSeconds: number }>;
+    }>;
+    notification?: { status: string; summary: string; usage?: unknown } | undefined;
+  };
   [key: string]: unknown;
 };
 

@@ -771,6 +771,72 @@ export class ClaudeSessionsProvider implements IProviderSessions {
       }
     }
 
+    // ── Workflow progress aggregation ──────────────────────────────────
+    // Attach task_started/task_progress/tool_progress/task_notification onto
+    // the matching Workflow tool_use so history replay renders the same card
+    // shape the live stream produces. See
+    // docs/superpowers/specs/2026-08-05-workflow-adaptation-design.md §3.5.
+    const wfStartedByToolUseId = new Map<string, NormalizedMessage>();
+    const wfProgressByTaskId = new Map<string, NormalizedMessage[]>();
+    const wfToolProgressByTaskId = new Map<string, NormalizedMessage[]>();
+    const wfNotifByTaskId = new Map<string, NormalizedMessage>();
+    const wfToolResultByToolId = new Map<string, NormalizedMessage>();
+    for (const msg of normalized) {
+      if (msg.kind === 'task_started' && msg.toolUseId) {
+        wfStartedByToolUseId.set(msg.toolUseId, msg);
+      } else if (msg.kind === 'task_progress') {
+        const arr = wfProgressByTaskId.get(msg.taskId ?? '') ?? [];
+        arr.push(msg);
+        wfProgressByTaskId.set(msg.taskId ?? '', arr);
+      } else if (msg.kind === 'tool_progress' && msg.taskId) {
+        const arr = wfToolProgressByTaskId.get(msg.taskId) ?? [];
+        arr.push(msg);
+        wfToolProgressByTaskId.set(msg.taskId, arr);
+      } else if (msg.kind === 'task_notification') {
+        wfNotifByTaskId.set(msg.taskId ?? '', msg);
+      } else if (msg.kind === 'tool_result' && msg.toolId) {
+        if (!wfToolResultByToolId.has(msg.toolId)) {
+          wfToolResultByToolId.set(msg.toolId, msg);
+        }
+      }
+    }
+    for (const msg of normalized) {
+      if (msg.kind !== 'tool_use' || msg.toolName !== 'Workflow') continue;
+      const started = msg.toolId ? wfStartedByToolUseId.get(msg.toolId) : undefined;
+      const taskId = started?.taskId;
+      if (!taskId) continue;
+      const progress = wfProgressByTaskId.get(taskId) ?? [];
+      const tools = wfToolProgressByTaskId.get(taskId) ?? [];
+      const notif = wfNotifByTaskId.get(taskId);
+      const toolResult = msg.toolId ? wfToolResultByToolId.get(msg.toolId) : undefined;
+      (msg as NormalizedMessage).workflowState = {
+        status: notif?.status ?? 'running',
+        workflowName: started?.workflowName,
+        agents: progress.map((p) => ({
+          taskId: p.taskId ?? '',
+          description: p.description ?? '',
+          lastToolName: p.lastToolName ?? undefined,
+          usage: p.usage ?? undefined,
+          tools: tools.map((t) => ({
+            toolUseId: t.toolUseId ?? '',
+            toolName: t.toolName ?? '',
+            elapsedTimeSeconds: t.elapsedTimeSeconds ?? 0,
+          })),
+        })),
+        notification: notif
+          ? { status: notif.status ?? 'completed', summary: notif.summary ?? '', usage: notif.usage }
+          : undefined,
+      };
+      // Hoist WorkflowOutput fields from the matching tool_result so the
+      // Workflow tool_use is self-contained for re-run/resume buttons.
+      if (toolResult) {
+        msg.runId = toolResult.runId ?? undefined;
+        msg.scriptPath = toolResult.scriptPath ?? undefined;
+        msg.transcriptDir = toolResult.transcriptDir ?? undefined;
+        msg.summary = toolResult.summary ?? undefined;
+      }
+    }
+
     let total = 0;
     for (const msg of normalized) {
       if (msg.kind !== 'tool_result') {
