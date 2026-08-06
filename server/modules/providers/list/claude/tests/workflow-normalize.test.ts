@@ -153,6 +153,7 @@ test('tool_result with local_workflow toolUseResult lifts runId + scriptPath', (
   assert.equal(out[0].scriptPath, '/home/.claude/projects/x/sess-1/workflows/wf.js');
   assert.equal(out[0].workflowName, 'spec');
   assert.equal(out[0].taskId, 'T1');
+  assert.equal(out[0].summary, 'launched');
 });
 
 test('tool_result with remote_agent toolUseResult does NOT lift fields', () => {
@@ -170,4 +171,36 @@ test('tool_result with remote_agent toolUseResult does NOT lift fields', () => {
   assert.equal(out[0].kind, 'tool_result');
   assert.equal(out[0].runId, undefined);
   assert.equal(out[0].scriptPath, undefined);
+});
+
+test('user-content tool_result with local_workflow toolUseResult lifts fields', () => {
+  const raw = {
+    type: 'user',
+    message: {
+      role: 'user',
+      content: [
+        { type: 'tool_result', tool_use_id: 'TU_root', content: 'ok', is_error: false },
+      ],
+    },
+    toolUseResult: {
+      status: 'async_launched',
+      taskId: 'T1',
+      taskType: 'local_workflow',
+      workflowName: 'spec',
+      runId: 'wf_abc',
+      scriptPath: '/p/wf.js',
+      transcriptDir: '/p/subagents',
+      summary: 'launched',
+    },
+    subagentTools: [],
+    uuid: 'u9',
+    session_id: SID,
+    timestamp: '2026-08-05T00:00:08.000Z',
+  };
+  const out = provider.normalizeMessage(raw, SID);
+  const tr = out.find((m) => m.kind === 'tool_result');
+  assert.ok(tr, 'tool_result present');
+  assert.equal(tr.runId, 'wf_abc');
+  assert.equal(tr.scriptPath, '/p/wf.js');
+  assert.equal(tr.summary, 'launched');
 });

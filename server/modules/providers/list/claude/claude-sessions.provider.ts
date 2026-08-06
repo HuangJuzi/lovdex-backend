@@ -401,7 +401,7 @@ export class ClaudeSessionsProvider implements IProviderSessions {
           tasks,
         })];
       }
-      // thinking_tokens / commands_changed / 其它 system 暂不处理。
+      // thinking_tokens / commands_changed / other system subtypes are not handled yet.
       return [];
     }
 
@@ -437,6 +437,8 @@ export class ClaudeSessionsProvider implements IProviderSessions {
         for (let partIndex = 0; partIndex < raw.message.content.length; partIndex++) {
           const part = raw.message.content[partIndex];
           if (part.type === 'tool_result') {
+            const tur = (raw.toolUseResult || part.toolUseResult) as AnyRecord | undefined;
+            const isLocalWorkflow = tur?.taskType === 'local_workflow';
             messages.push(createNormalizedMessage({
               id: `${baseId}_tr_${part.tool_use_id}`,
               sessionId,
@@ -448,6 +450,15 @@ export class ClaudeSessionsProvider implements IProviderSessions {
               isError: Boolean(part.is_error),
               subagentTools: raw.subagentTools,
               toolUseResult: raw.toolUseResult,
+              // Lift WorkflowOutput fields for local_workflow so the frontend
+              // card can offer re-run/resume without parsing toolUseResult.
+              taskId: isLocalWorkflow ? tur?.taskId : undefined,
+              taskType: isLocalWorkflow ? tur?.taskType : undefined,
+              workflowName: isLocalWorkflow ? tur?.workflowName : undefined,
+              runId: isLocalWorkflow ? tur?.runId : undefined,
+              scriptPath: isLocalWorkflow ? tur?.scriptPath : undefined,
+              transcriptDir: isLocalWorkflow ? tur?.transcriptDir : undefined,
+              summary: isLocalWorkflow ? tur?.summary : undefined,
             }));
           } else if (part.type === 'text') {
             const text = part.text || '';
@@ -638,6 +649,7 @@ export class ClaudeSessionsProvider implements IProviderSessions {
         runId: isLocalWorkflow ? tur?.runId : undefined,
         scriptPath: isLocalWorkflow ? tur?.scriptPath : undefined,
         transcriptDir: isLocalWorkflow ? tur?.transcriptDir : undefined,
+        summary: isLocalWorkflow ? tur?.summary : undefined,
       }));
       return messages;
     }
