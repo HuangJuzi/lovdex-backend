@@ -180,7 +180,11 @@ export type MessageKind =
   | 'permission_cancelled'
   | 'session_created'
   | 'interactive_prompt'
-  | 'task_notification';
+  | 'task_notification'
+  | 'task_started'
+  | 'task_progress'
+  | 'tool_progress'
+  | 'background_tasks_changed';
 
 /**
  * Event kinds added by the chat gateway layer on top of provider message kinds.
@@ -267,6 +271,24 @@ export type NormalizedMessage = {
   toolUseResult?: unknown;
   sequence?: number;
   rowid?: number;
+  /** Workflow / background task linkage (task_started/task_progress/tool_progress/task_notification). */
+  taskId?: string;
+  /** 'local_workflow' | 'remote_agent' | 其它 SDK task_type。 */
+  taskType?: string;
+  workflowName?: string;
+  subagentType?: string;
+  skipTranscript?: boolean;
+  lastToolName?: string;
+  elapsedTimeSeconds?: number;
+  outputFile?: string;
+  /** WorkflowOutput 提顶字段(local_workflow tool_result)。 */
+  runId?: string;
+  scriptPath?: string;
+  transcriptDir?: string;
+  /** tool_progress 的父链:指向 agent 的 tool_use_id(或 Workflow 根)。 */
+  parentToolUseId?: string;
+  /** background_tasks_changed 的 level payload(REPLACE 语义)。 */
+  tasks?: Array<{ taskId: string; taskType: string; description: string }>;
   [key: string]: unknown;
 };
 
