@@ -238,6 +238,15 @@ function mapCliOptionsToSDK(options = {}) {
     sdkOptions.resume = sessionId;
   }
 
+  // Workflow feature toggles (see docs/superpowers/specs/2026-08-05-workflow-adaptation-design.md §5).
+  // Unset → SDK default (enabled). Only flip when the env explicitly says 'false'.
+  if (process.env.WORKFLOWS_ENABLED !== undefined) {
+    sdkOptions.enableWorkflows = process.env.WORKFLOWS_ENABLED !== 'false';
+  }
+  if (process.env.ULTRACODE_KEYWORD_TRIGGER !== undefined) {
+    sdkOptions.workflowKeywordTriggerEnabled = process.env.ULTRACODE_KEYWORD_TRIGGER !== 'false';
+  }
+
   return sdkOptions;
 }
 
