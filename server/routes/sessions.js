@@ -1,3 +1,6 @@
+import path from 'path';
+import fs from 'node:fs';
+import fsp from 'fs/promises';
 import express from 'express';
 import { forkSession } from '@anthropic-ai/claude-agent-sdk';
 import { sessionsDb } from '../modules/database/index.js';
@@ -68,6 +71,36 @@ export async function rewindAppSession(deps, appId, { upToMessageId, turnTimesta
   return { ...forkResult, body: { ...forkResult.body, warnings } };
 }
 
+/**
+ * Reads a workflow script file for the "edit script" card action.
+ * Whitelist: `path` must resolve inside the session's transcript directory
+ * (the dirname of the session jsonl_path). Returns { status, body } so it
+ * can be unit-tested with injected deps.
+ * @param {{ path?: string, sessionDir?: string }} input
+ * @returns {Promise<{ status: number, body: any }>}
+ */
+export async function readWorkflowScript({ path: rawPath, sessionDir }) {
+  if (!rawPath || typeof rawPath !== 'string') {
+    return { status: 400, body: { error: { message: 'path is required' } } };
+  }
+  if (!sessionDir || typeof sessionDir !== 'string') {
+    return { status: 400, body: { error: { message: 'sessionDir is required' } } };
+  }
+  const resolved = path.resolve(rawPath);
+  const root = path.resolve(sessionDir);
+  const rel = path.relative(root, resolved);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    return { status: 403, body: { error: { message: 'path is outside the session directory' } } };
+  }
+  try {
+    await fsp.access(resolved, fs.constants.R_OK);
+  } catch {
+    return { status: 404, body: { error: { message: 'workflow script not found' } } };
+  }
+  const content = await fsp.readFile(resolved, 'utf8');
+  return { status: 200, body: { content, path: resolved } };
+}
+
 function buildRouter(deps) {
   const r = express.Router();
   r.post('/:appId/fork', async (req, res) => {
@@ -86,6 +119,25 @@ function buildRouter(deps) {
       const { status, body } = await rewindAppSession(deps, req.params.appId, {
         upToMessageId: req.body?.upToMessageId,
         turnTimestamp: req.body?.turnTimestamp,
+      });
+      res.status(status).json(body);
+    } catch (err) {
+      res.status(500).json({ error: { message: err.message } });
+    }
+  });
+  r.get('/:appId/workflow-script', async (req, res) => {
+    try {
+      const row = deps.sessionsDb.getSessionById(req.params.appId);
+      if (!row) {
+        return res.status(404).json({ error: { message: 'Session not found' } });
+      }
+      if (!row.jsonl_path) {
+        return res.status(409).json({ error: { code: 'NO_TRANSCRIPT', message: 'Session has no transcript yet' } });
+      }
+      const sessionDir = path.dirname(row.jsonl_path);
+      const { status, body } = await readWorkflowScript({
+        path: req.query.path,
+        sessionDir,
       });
       res.status(status).json(body);
     } catch (err) {
