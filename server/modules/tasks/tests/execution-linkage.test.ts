@@ -70,11 +70,36 @@ test('session event for unknown session is a no-op', () => {
   svc.onSessionStatus('nope', 'running');
 });
 
-test('running does not touch a done task', () => {
+test('running reopens an in_review task to in_progress (resume from review)', () => {
+  const rows = [makeRow({ status: 'in_review', session_id: 's1' })];
+  const svc = createTasksService(makeDb(rows), { broadcast: () => {} });
+  svc.onSessionStatus('s1', 'running');
+  assert.equal(rows[0].status, 'in_progress');
+});
+
+test('running reopens a done task to in_progress (agent works again)', () => {
   const rows = [makeRow({ status: 'done', session_id: 's1' })];
   const svc = createTasksService(makeDb(rows), { broadcast: () => {} });
   svc.onSessionStatus('s1', 'running');
-  assert.equal(rows[0].status, 'done');
+  assert.equal(rows[0].status, 'in_progress');
+});
+
+test('running on an already in_progress task is a no-op (no redundant event)', () => {
+  const rows = [makeRow({ status: 'in_progress', session_id: 's1' })];
+  const events: unknown[] = [];
+  const svc = createTasksService(makeDb(rows), { broadcast: (e) => events.push(e) });
+  svc.onSessionStatus('s1', 'running');
+  assert.equal(rows[0].status, 'in_progress');
+  assert.equal(events.length, 0);
+});
+
+test('in_review resume loop: running → in_progress → completed → in_review', () => {
+  const rows = [makeRow({ status: 'in_review', session_id: 's1' })];
+  const svc = createTasksService(makeDb(rows), { broadcast: () => {} });
+  svc.onSessionStatus('s1', 'running');
+  assert.equal(rows[0].status, 'in_progress');
+  svc.onSessionStatus('s1', 'completed');
+  assert.equal(rows[0].status, 'in_review');
 });
 
 test('running broadcast carries actor engine', () => {

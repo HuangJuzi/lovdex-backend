@@ -170,7 +170,13 @@ export function createTasksService(
       if (!row) return;
       switch (state) {
         case 'running':
-          if (row.status === 'todo') applyStatusChange(row.task_id, 'in_progress', 'engine');
+          // A live run means the agent is actively working, so the task must
+          // read as in_progress — not just for the initial todo→in_progress
+          // start, but whenever work resumes on a task that had settled into
+          // in_review (or a done task the user reopened to ask for more). The
+          // board should never show "评审中/已完成" while the agent is typing.
+          // Only an already-running task is left alone (no redundant event).
+          if (row.status !== 'in_progress') applyStatusChange(row.task_id, 'in_progress', 'engine');
           break;
         case 'completed':
           if (row.status === 'in_progress') applyStatusChange(row.task_id, 'in_review', 'engine');
