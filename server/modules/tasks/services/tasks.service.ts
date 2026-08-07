@@ -155,6 +155,27 @@ export function createTasksService(
       emit({ kind: 'task_upserted', task: updated, actor: 'user' });
       return { sessionId };
     },
+
+    onSessionStatus(sessionId: string, state: 'running' | 'completed' | 'failed' | 'aborted'): void {
+      const row = resolveDb.getTaskBySessionId(sessionId);
+      if (!row) return;
+      switch (state) {
+        case 'running':
+          if (row.status === 'todo') this.applyStatusChange(row.task_id, 'in_progress', 'engine');
+          break;
+        case 'completed':
+          if (row.status === 'in_progress') this.applyStatusChange(row.task_id, 'in_review', 'engine');
+          break;
+        case 'failed':
+          // Guarded rollback: only a task currently in_progress is rolled back to todo.
+          if (row.status === 'in_progress') this.applyStatusChange(row.task_id, 'todo', 'engine');
+          break;
+        case 'aborted':
+          break;
+        default:
+          break;
+      }
+    },
   };
 }
 
