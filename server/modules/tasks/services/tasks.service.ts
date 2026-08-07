@@ -66,6 +66,18 @@ export function createTasksService(
     opts.broadcast({ ...event, timestamp: new Date().toISOString() });
   }
 
+  function applyStatusChange(taskId: string, status: TaskStatus, actor: 'user' | 'engine'): TaskRow | null {
+    if (!isTaskStatus(status)) {
+      throw new AppError(`invalid status: ${String(status)}`, { code: 'INVALID_STATUS', statusCode: 400 });
+    }
+    const row = resolveDb.getTask(taskId);
+    if (!row) return null;
+    resolveDb.updateTaskStatus(taskId, status);
+    const updated = resolveDb.getTask(taskId) ?? row;
+    emit({ kind: 'task_upserted', task: updated, actor });
+    return updated;
+  }
+
   return {
     STATUS_ORDER,
 
@@ -104,17 +116,7 @@ export function createTasksService(
       return resolveDb.listTasks(filter);
     },
 
-    applyStatusChange(taskId: string, status: TaskStatus, actor: 'user' | 'engine'): TaskRow | null {
-      if (!isTaskStatus(status)) {
-        throw new AppError(`invalid status: ${String(status)}`, { code: 'INVALID_STATUS', statusCode: 400 });
-      }
-      const row = resolveDb.getTask(taskId);
-      if (!row) return null;
-      resolveDb.updateTaskStatus(taskId, status);
-      const updated = resolveDb.getTask(taskId) ?? row;
-      emit({ kind: 'task_upserted', task: updated, actor });
-      return updated;
-    },
+    applyStatusChange,
 
     updateTask(taskId: string, updates: Parameters<TaskDbLike['updateTask']>[1]): TaskRow | null {
       if (updates.executorProvider !== undefined && !isTaskEngine(updates.executorProvider)) {
@@ -161,16 +163,18 @@ export function createTasksService(
       if (!row) return;
       switch (state) {
         case 'running':
-          if (row.status === 'todo') this.applyStatusChange(row.task_id, 'in_progress', 'engine');
+          if (row.status === 'todo') applyStatusChange(row.task_id, 'in_progress', 'engine');
           break;
         case 'completed':
-          if (row.status === 'in_progress') this.applyStatusChange(row.task_id, 'in_review', 'engine');
+          if (row.status === 'in_progress') applyStatusChange(row.task_id, 'in_review', 'engine');
           break;
         case 'failed':
           // Guarded rollback: only a task currently in_progress is rolled back to todo.
-          if (row.status === 'in_progress') this.applyStatusChange(row.task_id, 'todo', 'engine');
+          if (row.status === 'in_progress') applyStatusChange(row.task_id, 'todo', 'engine');
           break;
         case 'aborted':
+          // Deliberate no-op: the task stays in_progress because the user may resume
+          // the aborted session (e.g. continue the conversation).
           break;
         default:
           break;

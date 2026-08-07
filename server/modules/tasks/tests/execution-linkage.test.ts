@@ -8,7 +8,7 @@ type Row = TaskRow & { status: TaskRow['status'] };
 function makeDb(initial: Row[]) {
   const rows = [...initial];
   return {
-    createTask: (i: unknown) => rows[0] ?? ({} as TaskRow),
+    createTask: (_i: unknown) => rows[0] ?? ({} as TaskRow),
     getTask: (id: string) => rows.find(t => t.task_id === id) ?? null,
     getTaskBySessionId: (sid: string) => rows.find(t => t.session_id === sid) ?? null,
     listTasks: (filter: { status?: TaskRow['status'] } = {}) => filter.status ? rows.filter(t => t.status === filter.status) : rows,
@@ -75,4 +75,22 @@ test('running does not touch a done task', () => {
   const svc = createTasksService(makeDb(rows), { broadcast: () => {} });
   svc.onSessionStatus('s1', 'running');
   assert.equal(rows[0].status, 'done');
+});
+
+test('running broadcast carries actor engine', () => {
+  const rows = [makeRow({ status: 'todo', session_id: 's1' })];
+  const events: unknown[] = [];
+  const svc = createTasksService(makeDb(rows), { broadcast: (e) => events.push(e) });
+  svc.onSessionStatus('s1', 'running');
+  assert.equal((events[0] as { kind: string }).kind, 'task_upserted');
+  assert.equal((events[0] as { actor: string }).actor, 'engine');
+});
+
+test('failed then running re-enters in_progress (retry loop)', () => {
+  const rows = [makeRow({ status: 'in_progress', session_id: 's1' })];
+  const svc = createTasksService(makeDb(rows), { broadcast: () => {} });
+  svc.onSessionStatus('s1', 'failed');
+  assert.equal(rows[0].status, 'todo');
+  svc.onSessionStatus('s1', 'running');
+  assert.equal(rows[0].status, 'in_progress');
 });
