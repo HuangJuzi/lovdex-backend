@@ -55,6 +55,13 @@ export function buildTasksRouter(tasksService: TasksService, deps: { createSessi
     asyncHandler(async (req, res) => {
       const taskId = String(req.params.taskId);
       const body = (req.body ?? {}) as Record<string, unknown>;
+      if (body.status !== undefined && (typeof body.status !== 'string' || !isTaskStatus(body.status))) {
+        throw new AppError(`invalid status: ${String(body.status)}`, { code: 'INVALID_STATUS', statusCode: 400 });
+      }
+      const hasFieldUpdates = ['title', 'description', 'executorProvider', 'executorModel', 'sessionId'].some((k) => body[k] !== undefined);
+      if (typeof body.status === 'string' && hasFieldUpdates) {
+        throw new AppError('cannot update status and fields in the same request', { code: 'INVALID_REQUEST', statusCode: 400 });
+      }
       if (typeof body.status === 'string') {
         if (!isTaskStatus(body.status)) {
           throw new AppError(`invalid status: ${body.status}`, { code: 'INVALID_STATUS', statusCode: 400 });
