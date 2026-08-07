@@ -120,6 +120,23 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 `;
 
+export const TASKS_TABLE_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS tasks (
+    task_id           TEXT PRIMARY KEY NOT NULL,
+    project_path      TEXT NOT NULL REFERENCES projects(project_path) ON DELETE CASCADE ON UPDATE CASCADE,
+    title             TEXT NOT NULL,
+    description       TEXT,
+    status            TEXT NOT NULL DEFAULT 'backlog'
+                      CHECK (status IN ('backlog','todo','in_progress','in_review','done')),
+    executor_provider TEXT NOT NULL DEFAULT 'claude' CHECK (executor_provider IN ('claude','codex')),
+    executor_model    TEXT,
+    position          REAL NOT NULL DEFAULT 0,
+    session_id        TEXT,
+    created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+`;
+
 export const LAST_SCANNED_AT_SQL = `
 CREATE TABLE IF NOT EXISTS scan_state (
   id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -174,6 +191,10 @@ ${SESSIONS_TABLE_SCHEMA_SQL}
 CREATE INDEX IF NOT EXISTS idx_session_ids_lookup ON sessions(session_id);
 -- NOTE: This index is created in migrations after sessions is rebuilt to include project_path.
 -- Creating it here can fail on upgraded installs where the legacy sessions table has no project_path.
+
+${TASKS_TABLE_SCHEMA_SQL}
+CREATE INDEX IF NOT EXISTS idx_tasks_project_status ON tasks(project_path, status);
+CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_id);
 
 ${LAST_SCANNED_AT_SQL}
 
