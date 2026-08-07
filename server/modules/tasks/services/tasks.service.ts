@@ -1,17 +1,21 @@
-import { isTaskEngine, isTaskStatus, tasksDb } from '@/modules/database/repositories/tasks.db.js';
+import { projectsDb } from '@/modules/database/index.js';
+import { isTaskEngine, isTaskStatus, TASK_STATUSES, tasksDb } from '@/modules/database/repositories/tasks.db.js';
+import { AppError } from '@/shared/utils.js';
 import type { TaskEngine, TaskRow, TaskStatus } from '@/shared/types.js';
 
-export const STATUS_ORDER: readonly TaskStatus[] = ['backlog', 'todo', 'in_progress', 'in_review', 'done'];
+export const STATUS_ORDER: readonly TaskStatus[] = TASK_STATUSES;
 
-export type TaskUpsertedEvent = {
-  kind: 'task_upserted';
-  task: TaskRow;
-  actor: 'user' | 'engine';
-  approval?: { pending: boolean };
-  timestamp: string;
-};
+export type TaskEvent =
+  | {
+      kind: 'task_upserted';
+      task: TaskRow;
+      actor: 'user' | 'engine';
+      approval?: { pending: boolean };
+      timestamp: string;
+    }
+  | { kind: 'task_deleted'; taskId: string; actor: 'user' | 'engine'; timestamp: string };
 
-export type TaskBroadcast = (event: TaskUpsertedEvent) => void;
+export type TaskBroadcast = (event: TaskEvent) => void;
 
 export type TaskDbLike = Pick<
   typeof tasksDb,
@@ -35,17 +39,30 @@ type CreateTaskInput = {
   executorModel?: string | null;
 };
 
+/**
+ * Broadcast payload before the server-generated `timestamp` is attached.
+ * Kept as an explicit union so `emit` can stay type-safe across both kinds.
+ */
+type TaskEventInput =
+  | {
+      kind: 'task_upserted';
+      task: TaskRow;
+      actor: 'user' | 'engine';
+      approval?: { pending: boolean };
+    }
+  | { kind: 'task_deleted'; taskId: string; actor: 'user' | 'engine' };
+
 export function createTasksService(
   db: TaskDbLike,
   opts: {
     broadcast: TaskBroadcast;
-    deps?: { projectsDb?: { getProjectPath: (path: string) => unknown } };
+    deps?: { projectsDb?: typeof projectsDb };
   },
 ) {
-  const resolveDb = db ?? tasksDb;
-  const resolveProject = opts.deps?.projectsDb;
+  const resolveDb = db;
+  const resolveProject = opts.deps?.projectsDb ?? projectsDb;
 
-  function emit(event: Omit<TaskUpsertedEvent, 'timestamp'>): void {
+  function emit(event: TaskEventInput): void {
     opts.broadcast({ ...event, timestamp: new Date().toISOString() });
   }
 
@@ -55,13 +72,15 @@ export function createTasksService(
     createTask(input: CreateTaskInput): TaskRow {
       const status = input.status ?? 'backlog';
       const provider = input.executorProvider ?? 'claude';
-      if (!isTaskStatus(status)) throw new Error(`invalid status: ${String(status)}`);
-      if (!isTaskEngine(provider)) throw new Error(`invalid executor_provider: ${String(provider)}`);
-      // Project existence is validated only when a project resolver is injected.
-      // Tests can therefore exercise the service without a real database row.
-      if (resolveProject) {
-        const project = resolveProject.getProjectPath(input.projectPath);
-        if (!project) throw new Error(`project not found: ${input.projectPath}`);
+      if (!isTaskStatus(status)) {
+        throw new AppError(`invalid status: ${String(status)}`, { code: 'INVALID_STATUS', statusCode: 400 });
+      }
+      if (!isTaskEngine(provider)) {
+        throw new AppError(`invalid executor_provider: ${String(provider)}`, { code: 'INVALID_EXECUTOR', statusCode: 400 });
+      }
+      const project = resolveProject.getProjectPath(input.projectPath);
+      if (!project) {
+        throw new AppError(`project not found: ${input.projectPath}`, { code: 'PROJECT_NOT_FOUND', statusCode: 404 });
       }
       const row = resolveDb.createTask({
         projectPath: input.projectPath,
@@ -79,11 +98,16 @@ export function createTasksService(
     },
 
     listTasks(filter: { projectPath?: string; status?: TaskStatus } = {}): TaskRow[] {
+      if (filter.status !== undefined && !isTaskStatus(filter.status)) {
+        throw new AppError(`invalid status: ${String(filter.status)}`, { code: 'INVALID_STATUS', statusCode: 400 });
+      }
       return resolveDb.listTasks(filter);
     },
 
     applyStatusChange(taskId: string, status: TaskStatus, actor: 'user' | 'engine'): TaskRow | null {
-      if (!isTaskStatus(status)) throw new Error(`invalid status: ${String(status)}`);
+      if (!isTaskStatus(status)) {
+        throw new AppError(`invalid status: ${String(status)}`, { code: 'INVALID_STATUS', statusCode: 400 });
+      }
       const row = resolveDb.getTask(taskId);
       if (!row) return null;
       resolveDb.updateTaskStatus(taskId, status);
@@ -94,7 +118,10 @@ export function createTasksService(
 
     updateTask(taskId: string, updates: Parameters<TaskDbLike['updateTask']>[1]): TaskRow | null {
       if (updates.executorProvider !== undefined && !isTaskEngine(updates.executorProvider)) {
-        throw new Error(`invalid executor_provider: ${String(updates.executorProvider)}`);
+        throw new AppError(`invalid executor_provider: ${String(updates.executorProvider)}`, {
+          code: 'INVALID_EXECUTOR',
+          statusCode: 400,
+        });
       }
       const row = resolveDb.updateTask(taskId, updates);
       if (row) emit({ kind: 'task_upserted', task: row, actor: 'user' });
@@ -103,10 +130,13 @@ export function createTasksService(
 
     deleteTask(taskId: string): void {
       resolveDb.deleteTask(taskId);
+      emit({ kind: 'task_deleted', taskId, actor: 'user' });
     },
 
     moveTask(taskId: string, status: TaskStatus, beforeId: string | null, afterId: string | null): TaskRow | null {
-      if (!isTaskStatus(status)) throw new Error(`invalid status: ${String(status)}`);
+      if (!isTaskStatus(status)) {
+        throw new AppError(`invalid status: ${String(status)}`, { code: 'INVALID_STATUS', statusCode: 400 });
+      }
       resolveDb.moveTask(taskId, status, beforeId, afterId);
       const row = resolveDb.getTask(taskId);
       if (row) emit({ kind: 'task_upserted', task: row, actor: 'user' });
