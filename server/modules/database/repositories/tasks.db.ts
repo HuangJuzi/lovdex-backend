@@ -24,11 +24,12 @@ export const tasksDb = {
   }): TaskRow {
     const db = getConnection();
     const taskId = randomUUID();
+    const position = (db.prepare('SELECT COALESCE(MAX(position), 0) + 1 AS p FROM tasks WHERE status = ?').get('backlog') as { p: number }).p;
     const row = db.prepare(`
-      INSERT INTO tasks (task_id, project_path, title, description, status, executor_provider, executor_model)
-      VALUES (?, ?, ?, ?, 'backlog', ?, ?)
+      INSERT INTO tasks (task_id, project_path, title, description, status, executor_provider, executor_model, position)
+      VALUES (?, ?, ?, ?, 'backlog', ?, ?, ?)
       RETURNING *
-    `).get(taskId, input.projectPath, input.title, input.description ?? null, input.executorProvider, input.executorModel ?? null) as TaskRow;
+    `).get(taskId, input.projectPath, input.title, input.description ?? null, input.executorProvider, input.executorModel ?? null, position) as TaskRow;
     return row;
   },
 
@@ -98,7 +99,13 @@ export const tasksDb = {
   moveTask(taskId: string, status: TaskStatus, beforeId: string | null, afterId: string | null): void {
     const db = getConnection();
     let position: number;
-    if (beforeId) {
+    if (beforeId && afterId) {
+      const before = tasksDb.getTask(beforeId);
+      const after = tasksDb.getTask(afterId);
+      const beforePos = before?.position ?? 0;
+      const afterPos = after?.position ?? beforePos;
+      position = (beforePos + afterPos) / 2;
+    } else if (beforeId) {
       const before = tasksDb.getTask(beforeId);
       position = (before?.position ?? 0) - 1;
     } else if (afterId) {

@@ -71,3 +71,26 @@ test('tasksDb.listTasks filters by project and status', async () => {
     assert.equal(tasksDb.listTasks({ projectPath: '/tmp/b' }).length, 1);
   });
 });
+
+test('tasksDb.moveTask reorders within a column without collisions', async () => {
+  await withIsolatedDatabase(() => {
+    projectsDb.createProjectPath('/tmp/m');
+    const a = tasksDb.createTask({ projectPath: '/tmp/m', title: 'A', executorProvider: 'claude' });
+    const b = tasksDb.createTask({ projectPath: '/tmp/m', title: 'B', executorProvider: 'claude' });
+    const c = tasksDb.createTask({ projectPath: '/tmp/m', title: 'C', executorProvider: 'claude' });
+    // positions now 1,2,3 in backlog (distinct)
+
+    // Move C to top (single anchor: before A)
+    tasksDb.moveTask(c.task_id, 'backlog', a.task_id, null);
+    // Move B between C and A (both anchors → interpolation)
+    tasksDb.moveTask(b.task_id, 'backlog', c.task_id, a.task_id);
+
+    // No two tasks share a position
+    const positions = tasksDb.listTasks({}).map(t => t.position);
+    assert.equal(new Set(positions).size, positions.length, `positions collided: ${positions.join(',')}`);
+
+    // Canonical order: C, B, A
+    const order = tasksDb.listTasks({}).map(t => t.title);
+    assert.deepEqual(order, ['C', 'B', 'A']);
+  });
+});
