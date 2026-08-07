@@ -5,6 +5,7 @@ import fs, { promises as fsPromises } from 'fs';
 import path from 'path';
 import os from 'os';
 import http from 'http';
+import crypto from 'node:crypto';
 
 import express from 'express';
 import cors from 'cors';
@@ -12,7 +13,7 @@ import mime from 'mime-types';
 
 import { AppError, WORKSPACES_ROOT, validateWorkspacePath } from '@/shared/utils.js';
 import { closeSessionsWatcher, initializeSessionsWatcher } from '@/modules/providers/index.js';
-import { createWebSocketServer } from '@/modules/websocket/index.js';
+import { createWebSocketServer, connectedClients, WS_OPEN_STATE } from '@/modules/websocket/index.js';
 
 import { getConnectableHost } from '../shared/networkHosts.js';
 
@@ -33,7 +34,8 @@ import projectModuleRoutes from './modules/projects/projects.routes.js';
 import userRoutes from './routes/user.js';
 import providerRoutes from './modules/providers/provider.routes.js';
 import { assetsRoutes } from './modules/assets/index.js';
-import { initializeDatabase, projectsDb, sessionsDb } from './modules/database/index.js';
+import { initializeDatabase, projectsDb, sessionsDb, tasksDb } from './modules/database/index.js';
+import { buildTasksRouter, createTasksService } from './modules/tasks/index.js';
 import { validateApiKey, authenticateToken, authenticateWebSocket } from './middleware/auth.js';
 import { IS_PLATFORM } from './constants/config.js';
 import { c } from './utils/colors.js';
@@ -159,6 +161,19 @@ app.use('/api/user', authenticateToken, userRoutes);
 
 // Unified provider MCP routes (protected)
 app.use('/api/providers', authenticateToken, providerRoutes);
+
+// Tasks API Routes (protected)
+// Broadcast task_upserted / task_deleted events to connected WS clients. This
+// is the foundation for live board updates; the frontend subscribes over WS.
+const broadcastTask = (event) => {
+    connectedClients.forEach((client) => {
+        if (client.readyState === WS_OPEN_STATE) client.send(JSON.stringify(event));
+    });
+};
+const tasksService = createTasksService(tasksDb, { broadcast: broadcastTask, deps: { projectsDb } });
+app.use('/api/tasks', authenticateToken, buildTasksRouter(tasksService, {
+    createSession: (provider, projectPath) => sessionsDb.createAppSession(crypto.randomUUID(), provider, projectPath),
+}));
 
 // API Routes (protected)
 // /api/config endpoint removed - no longer needed
