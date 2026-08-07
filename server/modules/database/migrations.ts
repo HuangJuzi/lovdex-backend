@@ -428,7 +428,12 @@ const migrateTasksTable = (db: Database): void => {
     db.exec(TASKS_TABLE_SCHEMA_SQL);
     db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_project_status ON tasks(project_path, status);`);
     db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_id);`);
+    return;
   }
+  const tasksTableInfo = db.prepare('PRAGMA table_info(tasks)').all() as { name: string }[];
+  const taskColumnNames = tasksTableInfo.map((column) => column.name);
+  addColumnToTableIfNotExists(db, 'tasks', taskColumnNames, 'started_at', 'DATETIME');
+  addColumnToTableIfNotExists(db, 'tasks', taskColumnNames, 'completed_at', 'DATETIME');
 };
 
 export const runMigrations = (db: Database) => {

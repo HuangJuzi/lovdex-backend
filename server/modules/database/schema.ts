@@ -132,6 +132,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     executor_model    TEXT,
     position          REAL NOT NULL DEFAULT 0,
     session_id        TEXT,
+    started_at        DATETIME,
+    completed_at      DATETIME,
     created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP
 );
