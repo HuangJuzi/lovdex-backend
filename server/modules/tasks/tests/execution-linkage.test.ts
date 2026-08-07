@@ -31,6 +31,8 @@ function makeRow(overrides: Partial<Row> = {}): Row {
     executor_model: null,
     position: 0,
     session_id: 's1',
+    started_at: null,
+    completed_at: null,
     created_at: '2026-01-01',
     updated_at: '2026-01-01',
     ...overrides,
