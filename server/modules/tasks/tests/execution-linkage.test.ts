@@ -94,3 +94,15 @@ test('failed then running re-enters in_progress (retry loop)', () => {
   svc.onSessionStatus('s1', 'running');
   assert.equal(rows[0].status, 'in_progress');
 });
+
+test('onSessionApproval broadcasts approval marker without changing status', () => {
+  const rows = [makeRow({ status: 'in_progress', session_id: 's1' })];
+  const events: unknown[] = [];
+  const svc = createTasksService(makeDb(rows), { broadcast: (e) => events.push(e) });
+  svc.onSessionApproval('s1', true);
+  assert.equal(rows[0].status, 'in_progress');
+  assert.equal((events[0] as { approval?: { pending: boolean } }).approval?.pending, true);
+  assert.equal((events[0] as { actor: string }).actor, 'engine');
+  svc.onSessionApproval('s1', false);
+  assert.equal((events[1] as { approval?: { pending: boolean } }).approval?.pending, false);
+});

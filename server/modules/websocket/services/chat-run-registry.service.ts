@@ -149,7 +149,9 @@ function broadcastSessionStatus(
  * decoupled from the tasks module and testable without a service instance.
  */
 type TaskLinkage = {
-  onSessionStatus: (sessionId: string, state: 'running' | 'completed' | 'failed' | 'aborted') => void;
+  onSessionStatus: (sessionId: string, state: SessionStatusState) => void;
+  /** Marks/unmarks the linked task's live "等你批准" overlay (status untouched). */
+  onSessionApproval: (sessionId: string, pending: boolean) => void;
 };
 
 let taskLinkage: TaskLinkage | null = null;
@@ -158,6 +160,19 @@ let taskLinkage: TaskLinkage | null = null;
 export function setTaskLinkage(linkage: TaskLinkage | null): void {
   taskLinkage = linkage;
 }
+
+/** Read the task↔session linkage (used by the approval-response clear path). */
+export function getTaskLinkage(): TaskLinkage | null {
+  return taskLinkage;
+}
+
+/**
+ * Maps a pending permission requestId back to the app session that owns it, so
+ * the `chat.permission-response` handler can clear the task approval marker.
+ * Entries are added when `permission_request` flows through the registry and
+ * removed on `permission_cancelled` or once the human responds.
+ */
+const approvalRequestToSession = new Map<string, string>();
 
 function evictRunLater(appSessionId: string): void {
   const timer = setTimeout(() => {
@@ -182,6 +197,22 @@ function evictRunLater(appSessionId: string): void {
  * 4. Flip the run to `completed` when the terminal `complete` event passes by.
  */
 function decorateAndRecordEvent(run: ChatRun, message: NormalizedMessage): NormalizedMessage | null {
+  // A pending tool-approval prompt is surfaced as a live task marker (the
+  // "等你批准" overlay) so the board reflects the session waiting on the human.
+  // These events never change the task status — the marker is a realtime flag.
+  if (message.kind === 'permission_request') {
+    if (typeof message.requestId === 'string' && message.requestId) {
+      approvalRequestToSession.set(message.requestId, run.appSessionId);
+    }
+    taskLinkage?.onSessionApproval(run.appSessionId, true);
+  }
+  if (message.kind === 'permission_cancelled') {
+    if (typeof message.requestId === 'string' && message.requestId) {
+      approvalRequestToSession.delete(message.requestId);
+    }
+    taskLinkage?.onSessionApproval(run.appSessionId, false);
+  }
+
   // Exactly-one-complete contract: when a run is aborted the chat handler
   // emits the terminal `complete` immediately, but the killed runtime may
   // still emit its own `complete` from its exit handler moments later.
@@ -349,6 +380,22 @@ export const chatRunRegistry = {
 
   getRun(appSessionId: string): ChatRun | undefined {
     return runs.get(appSessionId);
+  },
+
+  /**
+   * Resolves the app session id that owns a pending permission request and
+   * forgets the mapping (the approval is being decided). Returns `null` when
+   * the requestId is unknown — e.g. the request predates this server process.
+   */
+  takeApprovalRequestSession(requestId: string): string | null {
+    if (!requestId) {
+      return null;
+    }
+    const appSessionId = approvalRequestToSession.get(requestId) ?? null;
+    if (appSessionId !== null) {
+      approvalRequestToSession.delete(requestId);
+    }
+    return appSessionId;
   },
 
   isProcessing(appSessionId: string): boolean {

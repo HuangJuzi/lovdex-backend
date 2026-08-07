@@ -180,6 +180,18 @@ export function createTasksService(
           break;
       }
     },
+
+    /**
+     * Surface a pending session permission request as a live "等你批准" overlay on
+     * the linked task. Unlike `onSessionStatus`, this deliberately does NOT touch
+     * the task's status — the marker is a realtime-only flag that the frontend
+     * renders on top of the in_progress column and clears once the human decides.
+     */
+    onSessionApproval(sessionId: string, pending: boolean): void {
+      const row = resolveDb.getTaskBySessionId(sessionId);
+      if (!row) return;
+      emit({ kind: 'task_upserted', task: row, actor: 'engine', approval: { pending } });
+    },
   };
 }
 

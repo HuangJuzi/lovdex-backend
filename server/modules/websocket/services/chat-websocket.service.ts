@@ -12,7 +12,7 @@ function dbg(line: string): void {
 }
 
 import { sessionsDb } from '@/modules/database/index.js';
-import { chatRunRegistry } from '@/modules/websocket/services/chat-run-registry.service.js';
+import { chatRunRegistry, getTaskLinkage } from '@/modules/websocket/services/chat-run-registry.service.js';
 import { connectedClients, WS_OPEN_STATE } from '@/modules/websocket/services/websocket-state.service.js';
 import { getGlobalImageAssetsDir, normalizeImageDescriptors } from '@/shared/image-attachments.js';
 import type {
@@ -350,16 +350,28 @@ function handleChatSubscribe(
  * approvals today, but the message is intentionally provider-neutral).
  */
 function handlePermissionResponse(data: AnyRecord, dependencies: ChatWebSocketDependencies): void {
-  if (typeof data.requestId !== 'string' || data.requestId.length === 0) {
+  const requestId = typeof data.requestId === 'string' && data.requestId.length > 0 ? data.requestId : '';
+  if (!requestId) {
     return;
   }
 
-  dependencies.resolveToolApproval(data.requestId, {
+  // Resolve the owning app session id before forwarding the decision — the
+  // pending-approval resolver is torn down synchronously by resolveToolApproval,
+  // and the registry keeps its own requestId→appSessionId map for this lookup.
+  const appSessionId = chatRunRegistry.takeApprovalRequestSession(requestId);
+
+  dependencies.resolveToolApproval(requestId, {
     allow: Boolean(data.allow),
     updatedInput: data.updatedInput,
     message: typeof data.message === 'string' ? data.message : undefined,
     rememberEntry: data.rememberEntry,
   });
+
+  // The human decided on the pending permission — drop the task's live
+  // "等你批准" marker (the task status itself is untouched by this flow).
+  if (appSessionId) {
+    getTaskLinkage()?.onSessionApproval(appSessionId, false);
+  }
 }
 
 /**
