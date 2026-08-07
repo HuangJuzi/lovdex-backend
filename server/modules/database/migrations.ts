@@ -7,6 +7,7 @@ import {
   PROJECTS_TABLE_SCHEMA_SQL,
   PUSH_SUBSCRIPTIONS_TABLE_SCHEMA_SQL,
   SESSIONS_TABLE_SCHEMA_SQL,
+  TASKS_TABLE_SCHEMA_SQL,
   USER_NOTIFICATION_PREFERENCES_TABLE_SCHEMA_SQL,
   VAPID_KEYS_TABLE_SCHEMA_SQL,
 } from '@/modules/database/schema.js';
@@ -421,6 +422,15 @@ const ensureProjectsForSessionPaths = (db: Database): void => {
   `);
 };
 
+const migrateTasksTable = (db: Database): void => {
+  if (!tableExists(db, 'tasks')) {
+    console.log('Running migration: creating tasks table');
+    db.exec(TASKS_TABLE_SCHEMA_SQL);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_project_status ON tasks(project_path, status);`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_id);`);
+  }
+};
+
 export const runMigrations = (db: Database) => {
   try {
     const usersTableInfo = db.prepare('PRAGMA table_info(users)').all() as { name: string }[];
@@ -458,6 +468,8 @@ export const runMigrations = (db: Database) => {
     addColumnToTableIfNotExists(db, 'sessions', sessionColumnNamesForSummary, 'summary', 'TEXT');
 
     ensureProjectsForSessionPaths(db);
+
+    migrateTasksTable(db);
 
     db.exec('CREATE INDEX IF NOT EXISTS idx_session_ids_lookup ON sessions(session_id)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_sessions_provider_session_id ON sessions(provider_session_id)');
