@@ -6,4 +6,5 @@ export { githubTokensDb } from '@/modules/database/repositories/github-tokens.js
 export { projectsDb } from '@/modules/database/repositories/projects.db.js';
 export { scanStateDb } from '@/modules/database/repositories/scan-state.db.js';
 export { sessionsDb } from '@/modules/database/repositories/sessions.db.js';
+export { tasksDb } from '@/modules/database/repositories/tasks.db.js';
 export { userDb } from '@/modules/database/repositories/users.js';
