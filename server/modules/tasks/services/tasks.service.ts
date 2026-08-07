@@ -1,0 +1,131 @@
+import { isTaskEngine, isTaskStatus, tasksDb } from '@/modules/database/repositories/tasks.db.js';
+import type { TaskEngine, TaskRow, TaskStatus } from '@/shared/types.js';
+
+export const STATUS_ORDER: readonly TaskStatus[] = ['backlog', 'todo', 'in_progress', 'in_review', 'done'];
+
+export type TaskUpsertedEvent = {
+  kind: 'task_upserted';
+  task: TaskRow;
+  actor: 'user' | 'engine';
+  approval?: { pending: boolean };
+  timestamp: string;
+};
+
+export type TaskBroadcast = (event: TaskUpsertedEvent) => void;
+
+export type TaskDbLike = Pick<
+  typeof tasksDb,
+  | 'createTask'
+  | 'getTask'
+  | 'getTaskBySessionId'
+  | 'listTasks'
+  | 'updateTask'
+  | 'updateTaskStatus'
+  | 'linkSession'
+  | 'deleteTask'
+  | 'moveTask'
+>;
+
+type CreateTaskInput = {
+  projectPath: string;
+  title: string;
+  description?: string | null;
+  status?: TaskStatus;
+  executorProvider?: TaskEngine;
+  executorModel?: string | null;
+};
+
+export function createTasksService(
+  db: TaskDbLike,
+  opts: {
+    broadcast: TaskBroadcast;
+    deps?: { projectsDb?: { getProjectPath: (path: string) => unknown } };
+  },
+) {
+  const resolveDb = db ?? tasksDb;
+  const resolveProject = opts.deps?.projectsDb;
+
+  function emit(event: Omit<TaskUpsertedEvent, 'timestamp'>): void {
+    opts.broadcast({ ...event, timestamp: new Date().toISOString() });
+  }
+
+  return {
+    STATUS_ORDER,
+
+    createTask(input: CreateTaskInput): TaskRow {
+      const status = input.status ?? 'backlog';
+      const provider = input.executorProvider ?? 'claude';
+      if (!isTaskStatus(status)) throw new Error(`invalid status: ${String(status)}`);
+      if (!isTaskEngine(provider)) throw new Error(`invalid executor_provider: ${String(provider)}`);
+      // Project existence is validated only when a project resolver is injected.
+      // Tests can therefore exercise the service without a real database row.
+      if (resolveProject) {
+        const project = resolveProject.getProjectPath(input.projectPath);
+        if (!project) throw new Error(`project not found: ${input.projectPath}`);
+      }
+      const row = resolveDb.createTask({
+        projectPath: input.projectPath,
+        title: input.title,
+        description: input.description ?? null,
+        executorProvider: provider,
+        executorModel: input.executorModel ?? null,
+      });
+      emit({ kind: 'task_upserted', task: row, actor: 'user' });
+      return row;
+    },
+
+    getTask(taskId: string): TaskRow | null {
+      return resolveDb.getTask(taskId);
+    },
+
+    listTasks(filter: { projectPath?: string; status?: TaskStatus } = {}): TaskRow[] {
+      return resolveDb.listTasks(filter);
+    },
+
+    applyStatusChange(taskId: string, status: TaskStatus, actor: 'user' | 'engine'): TaskRow | null {
+      if (!isTaskStatus(status)) throw new Error(`invalid status: ${String(status)}`);
+      const row = resolveDb.getTask(taskId);
+      if (!row) return null;
+      resolveDb.updateTaskStatus(taskId, status);
+      const updated = resolveDb.getTask(taskId) ?? row;
+      emit({ kind: 'task_upserted', task: updated, actor });
+      return updated;
+    },
+
+    updateTask(taskId: string, updates: Parameters<TaskDbLike['updateTask']>[1]): TaskRow | null {
+      if (updates.executorProvider !== undefined && !isTaskEngine(updates.executorProvider)) {
+        throw new Error(`invalid executor_provider: ${String(updates.executorProvider)}`);
+      }
+      const row = resolveDb.updateTask(taskId, updates);
+      if (row) emit({ kind: 'task_upserted', task: row, actor: 'user' });
+      return row;
+    },
+
+    deleteTask(taskId: string): void {
+      resolveDb.deleteTask(taskId);
+    },
+
+    moveTask(taskId: string, status: TaskStatus, beforeId: string | null, afterId: string | null): TaskRow | null {
+      if (!isTaskStatus(status)) throw new Error(`invalid status: ${String(status)}`);
+      resolveDb.moveTask(taskId, status, beforeId, afterId);
+      const row = resolveDb.getTask(taskId);
+      if (row) emit({ kind: 'task_upserted', task: row, actor: 'user' });
+      return row;
+    },
+
+    startExecution(
+      taskId: string,
+      createSession: (provider: TaskEngine, projectPath: string) => string,
+    ): { sessionId: string } | null {
+      const row = resolveDb.getTask(taskId);
+      if (!row) return null;
+      const sessionId = createSession(row.executor_provider, row.project_path);
+      resolveDb.linkSession(taskId, sessionId);
+      const updated = resolveDb.getTask(taskId) ?? row;
+      emit({ kind: 'task_upserted', task: updated, actor: 'user' });
+      return { sessionId };
+    },
+  };
+}
+
+export type TasksService = ReturnType<typeof createTasksService>;
