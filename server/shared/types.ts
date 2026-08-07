@@ -623,3 +623,39 @@ export type WorkspacePathValidationResult = {
   resolvedPath?: string;
   error?: string;
 };
+
+// ---------------------------
+//----------------- TASK TYPES ------------
+/**
+ * Lifecycle states a task can be in on the task board.
+ *
+ * `backlog` is unstarted work, `todo` is queued, `in_progress` is actively being
+ * executed, `in_review` is awaiting verification, and `done` is complete.
+ */
+export type TaskStatus = 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'done';
+
+/**
+ * Executor engines supported by task execution.
+ */
+export type TaskEngine = 'claude' | 'codex';
+
+/**
+ * Canonical task row shape returned by the tasks repository.
+ *
+ * Field names mirror the `tasks` table columns exactly (snake_case). `position`
+ * is the board sort order within a status column, and `session_id` links the
+ * task to its executing session when one exists.
+ */
+export type TaskRow = {
+  task_id: string;
+  project_path: string;
+  title: string;
+  description: string | null;
+  status: TaskStatus;
+  executor_provider: TaskEngine;
+  executor_model: string | null;
+  position: number;
+  session_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
