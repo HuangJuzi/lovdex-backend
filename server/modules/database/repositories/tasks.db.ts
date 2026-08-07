@@ -34,11 +34,31 @@ function normalizeTimestamp(value?: string): string | null {
   return parsed.toISOString();
 }
 
+/**
+ * Extra SET clauses written alongside a status change so each lifecycle
+ * timestamp records the moment the task entered its corresponding state.
+ * - entering in_progress  → started_at = now (refreshed on every re-run)
+ * - entering done         → completed_at = now
+ * - leaving done          → completed_at = NULL (task reopened, completion invalidated)
+ */
+function statusTimestampSets(from: TaskStatus, to: TaskStatus): string[] {
+  // A same-status move (drag-reorder within a column) is not a transition —
+  // leave lifecycle timestamps untouched.
+  if (from === to) return [];
+  const sets: string[] = [];
+  if (to === 'in_progress') sets.push('started_at = CURRENT_TIMESTAMP');
+  if (to === 'done') sets.push('completed_at = CURRENT_TIMESTAMP');
+  if (to !== 'done' && from === 'done') sets.push('completed_at = NULL');
+  return sets;
+}
+
 function normalizeTaskRow(row: TaskRow): TaskRow {
   return {
     ...row,
     created_at: normalizeTimestamp(row.created_at) ?? row.created_at,
     updated_at: normalizeTimestamp(row.updated_at) ?? row.updated_at,
+    started_at: row.started_at ? (normalizeTimestamp(row.started_at) ?? row.started_at) : null,
+    completed_at: row.completed_at ? (normalizeTimestamp(row.completed_at) ?? row.completed_at) : null,
   };
 }
 
@@ -113,7 +133,10 @@ export const tasksDb = {
 
   updateTaskStatus(taskId: string, status: TaskStatus): void {
     const db = getConnection();
-    db.prepare('UPDATE tasks SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE task_id = ?').run(status, taskId);
+    const current = db.prepare('SELECT status FROM tasks WHERE task_id = ?').get(taskId) as { status: TaskStatus } | undefined;
+    if (!current) return;
+    const sets = ['status = ?', 'updated_at = CURRENT_TIMESTAMP', ...statusTimestampSets(current.status, status)];
+    db.prepare(`UPDATE tasks SET ${sets.join(', ')} WHERE task_id = ?`).run(status, taskId);
   },
 
   linkSession(taskId: string, sessionId: string | null): void {
@@ -128,6 +151,8 @@ export const tasksDb = {
 
   moveTask(taskId: string, status: TaskStatus, beforeId: string | null, afterId: string | null): void {
     const db = getConnection();
+    const current = db.prepare('SELECT status FROM tasks WHERE task_id = ?').get(taskId) as { status: TaskStatus } | undefined;
+    if (!current) return;
     let position: number;
     if (beforeId && afterId) {
       const before = tasksDb.getTask(beforeId);
@@ -145,6 +170,7 @@ export const tasksDb = {
       const max = db.prepare('SELECT COALESCE(MAX(position), 0) + 1 AS p FROM tasks WHERE status = ?').get(status) as { p: number };
       position = max.p;
     }
-    db.prepare('UPDATE tasks SET status = ?, position = ?, updated_at = CURRENT_TIMESTAMP WHERE task_id = ?').run(status, position, taskId);
+    const sets = ['status = ?', 'position = ?', 'updated_at = CURRENT_TIMESTAMP', ...statusTimestampSets(current.status, status)];
+    db.prepare(`UPDATE tasks SET ${sets.join(', ')} WHERE task_id = ?`).run(status, position, taskId);
   },
 };

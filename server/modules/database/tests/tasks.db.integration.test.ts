@@ -98,3 +98,51 @@ test('tasksDb.moveTask reorders within a column without collisions', async () =>
     assert.deepEqual(order, ['C', 'B', 'A']);
   });
 });
+
+test('tasksDb status transitions write started_at / completed_at', async () => {
+  await withIsolatedDatabase(() => {
+    projectsDb.createProjectPath('/tmp/ts');
+    const created = tasksDb.createTask({ projectPath: '/tmp/ts', title: 't', executorProvider: 'claude' });
+    assert.equal(created.started_at, null);
+    assert.equal(created.completed_at, null);
+
+    tasksDb.updateTaskStatus(created.task_id, 'in_progress');
+    const running = tasksDb.getTask(created.task_id)!;
+    assert.ok(running.started_at, 'started_at set on in_progress');
+    assert.equal(running.completed_at, null);
+
+    tasksDb.updateTaskStatus(created.task_id, 'done');
+    const done = tasksDb.getTask(created.task_id)!;
+    assert.ok(done.completed_at, 'completed_at set on done');
+
+    // Reopen: leaving done clears completed_at; entering in_progress refreshes started_at
+    tasksDb.updateTaskStatus(created.task_id, 'in_progress');
+    const reopened = tasksDb.getTask(created.task_id)!;
+    assert.equal(reopened.completed_at, null, 'completed_at cleared when leaving done');
+    assert.ok(reopened.started_at, 'started_at remains set on re-run');
+  });
+});
+
+test('tasksDb.moveTask writes started_at / completed_at like updateTaskStatus', async () => {
+  await withIsolatedDatabase(() => {
+    projectsDb.createProjectPath('/tmp/mv');
+    const created = tasksDb.createTask({ projectPath: '/tmp/mv', title: 't', executorProvider: 'claude' });
+    tasksDb.moveTask(created.task_id, 'in_progress', null, null);
+    assert.ok(tasksDb.getTask(created.task_id)?.started_at, 'moveTask to in_progress sets started_at');
+    tasksDb.moveTask(created.task_id, 'done', null, null);
+    assert.ok(tasksDb.getTask(created.task_id)?.completed_at, 'moveTask to done sets completed_at');
+  });
+});
+
+test('tasksDb.moveTask within the same column does not re-stamp timestamps', async () => {
+  await withIsolatedDatabase(() => {
+    projectsDb.createProjectPath('/tmp/reorder');
+    const created = tasksDb.createTask({ projectPath: '/tmp/reorder', title: 't', executorProvider: 'claude' });
+    tasksDb.updateTaskStatus(created.task_id, 'done');
+    const doneAt = tasksDb.getTask(created.task_id)!.completed_at;
+    assert.ok(doneAt);
+    // Reorder within the done column (same status). completed_at must not change.
+    tasksDb.moveTask(created.task_id, 'done', null, null);
+    assert.equal(tasksDb.getTask(created.task_id)?.completed_at, doneAt, 'completed_at unchanged on same-column reorder');
+  });
+});
