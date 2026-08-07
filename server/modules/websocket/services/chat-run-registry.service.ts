@@ -144,6 +144,21 @@ function broadcastSessionStatus(
   });
 }
 
+/**
+ * Task↔session linkage, injected (not imported) so the registry stays
+ * decoupled from the tasks module and testable without a service instance.
+ */
+type TaskLinkage = {
+  onSessionStatus: (sessionId: string, state: 'running' | 'completed' | 'failed' | 'aborted') => void;
+};
+
+let taskLinkage: TaskLinkage | null = null;
+
+/** Wire the task↔session linkage (set once at server startup). */
+export function setTaskLinkage(linkage: TaskLinkage | null): void {
+  taskLinkage = linkage;
+}
+
 function evictRunLater(appSessionId: string): void {
   const timer = setTimeout(() => {
     const run = runs.get(appSessionId);
@@ -202,6 +217,7 @@ function decorateAndRecordEvent(run: ChatRun, message: NormalizedMessage): Norma
       startedAt: run.startedAt,
       completedAt: run.completedAt,
     });
+    taskLinkage?.onSessionStatus(run.appSessionId, state);
   }
 
   run.events.push(outbound);
@@ -327,6 +343,7 @@ export const chatRunRegistry = {
     // Fan out a `running` status so any client (not just the one that sent
     // chat.send) can flip the sidebar spinner for this session.
     broadcastSessionStatus(run.appSessionId, run.provider, 'running', { startedAt: run.startedAt });
+    taskLinkage?.onSessionStatus(run.appSessionId, 'running');
     return run;
   },
 

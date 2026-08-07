@@ -14,6 +14,7 @@ import mime from 'mime-types';
 import { AppError, WORKSPACES_ROOT, validateWorkspacePath } from '@/shared/utils.js';
 import { closeSessionsWatcher, initializeSessionsWatcher } from '@/modules/providers/index.js';
 import { createWebSocketServer, connectedClients, WS_OPEN_STATE } from '@/modules/websocket/index.js';
+import { setTaskLinkage } from '@/modules/websocket/services/chat-run-registry.service.js';
 
 import { getConnectableHost } from '../shared/networkHosts.js';
 
@@ -171,6 +172,8 @@ const broadcastTask = (event) => {
     });
 };
 const tasksService = createTasksService(tasksDb, { broadcast: broadcastTask, deps: { projectsDb } });
+// Wire session lifecycle → task status transitions (task↔session linkage).
+setTaskLinkage(tasksService);
 app.use('/api/tasks', authenticateToken, buildTasksRouter(tasksService, {
     createSession: (provider, projectPath) => sessionsDb.createAppSession(crypto.randomUUID(), provider, projectPath),
 }));
