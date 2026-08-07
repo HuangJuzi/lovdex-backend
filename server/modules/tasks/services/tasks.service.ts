@@ -155,6 +155,13 @@ export function createTasksService(
       resolveDb.linkSession(taskId, sessionId);
       const updated = resolveDb.getTask(taskId) ?? row;
       emit({ kind: 'task_upserted', task: updated, actor: 'user' });
+      // A task started directly from the backlog would otherwise never leave
+      // the column: the running session event only advances todo → in_progress.
+      // Advance backlog → todo so the existing state machine can pick it up.
+      // All other statuses are left untouched.
+      if (row.status === 'backlog') {
+        applyStatusChange(taskId, 'todo', 'user');
+      }
       return { sessionId };
     },
 

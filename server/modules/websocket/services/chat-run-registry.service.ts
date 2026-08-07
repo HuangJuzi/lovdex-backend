@@ -174,6 +174,20 @@ export function getTaskLinkage(): TaskLinkage | null {
  */
 const approvalRequestToSession = new Map<string, string>();
 
+/**
+ * Evicts every pending permission request owned by one app session. Called on
+ * the terminal `complete` (including the synthetic one emitted on abort/crash)
+ * so a request that can never be resolved does not leave its "等你批准" marker
+ * stuck nor leak its requestId→appSessionId mapping entry.
+ */
+function clearApprovalRequestsForSession(appSessionId: string): void {
+  for (const [requestId, ownerSessionId] of approvalRequestToSession) {
+    if (ownerSessionId === appSessionId) {
+      approvalRequestToSession.delete(requestId);
+    }
+  }
+}
+
 function evictRunLater(appSessionId: string): void {
   const timer = setTimeout(() => {
     const run = runs.get(appSessionId);
@@ -249,6 +263,13 @@ function decorateAndRecordEvent(run: ChatRun, message: NormalizedMessage): Norma
       completedAt: run.completedAt,
     });
     taskLinkage?.onSessionStatus(run.appSessionId, state);
+    // The run is over: a still-pending tool-approval can never be answered, so
+    // drop its "等你批准" marker and forget the request mapping. This covers the
+    // abort path and the crash safety-net, which only emit a synthetic
+    // `complete` (no `permission_cancelled`) and would otherwise leave the task
+    // marked pending forever.
+    clearApprovalRequestsForSession(run.appSessionId);
+    taskLinkage?.onSessionApproval(run.appSessionId, false);
   }
 
   run.events.push(outbound);
@@ -481,9 +502,10 @@ export const chatRunRegistry = {
   },
 
   /**
-   * Test-only escape hatch: clears every tracked run.
+   * Test-only escape hatch: clears every tracked run and pending approval map.
    */
   clearAll(): void {
     runs.clear();
+    approvalRequestToSession.clear();
   },
 };

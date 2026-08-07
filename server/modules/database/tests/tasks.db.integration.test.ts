@@ -43,6 +43,10 @@ test('tasksDb CRUD + status validation + session link', async () => {
     });
     assert.equal(created.status, 'backlog');
     assert.equal(created.executor_provider, 'claude');
+    // SQLite timestamps are normalized to ISO (with a T) so clients never
+    // parse them as local time.
+    assert.match(created.created_at, /^\d{4}-\d{2}-\d{2}T/);
+    assert.match(created.updated_at, /^\d{4}-\d{2}-\d{2}T/);
 
     const list = tasksDb.listTasks({});
     assert.equal(list.length, 1);

@@ -95,6 +95,30 @@ test('failed then running re-enters in_progress (retry loop)', () => {
   assert.equal(rows[0].status, 'in_progress');
 });
 
+test('startExecution advances a backlog task to todo and links a session', () => {
+  const rows = [makeRow({ status: 'backlog', session_id: 's1' })];
+  const svc = createTasksService(makeDb(rows), { broadcast: () => {} });
+  const result = svc.startExecution('t1', (provider, projectPath) => `session-${provider}-${projectPath}`);
+  assert.deepEqual(result, { sessionId: 'session-claude-/p' });
+  assert.equal(rows[0].status, 'todo');
+});
+
+test('startExecution backlog→todo then running advances to in_progress (full flow)', () => {
+  const rows = [makeRow({ status: 'backlog', session_id: 's1' })];
+  const svc = createTasksService(makeDb(rows), { broadcast: () => {} });
+  svc.startExecution('t1', () => 'session-claude-/p');
+  assert.equal(rows[0].status, 'todo');
+  svc.onSessionStatus('s1', 'running');
+  assert.equal(rows[0].status, 'in_progress');
+});
+
+test('startExecution leaves non-backlog statuses untouched', () => {
+  const rows = [makeRow({ status: 'in_progress', session_id: 's1' })];
+  const svc = createTasksService(makeDb(rows), { broadcast: () => {} });
+  svc.startExecution('t1', () => 'session-claude-/p');
+  assert.equal(rows[0].status, 'in_progress');
+});
+
 test('onSessionApproval broadcasts approval marker without changing status', () => {
   const rows = [makeRow({ status: 'in_progress', session_id: 's1' })];
   const events: unknown[] = [];

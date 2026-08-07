@@ -14,6 +14,34 @@ export function isTaskEngine(value: unknown): value is TaskEngine {
   return typeof value === 'string' && (TASK_ENGINES as readonly string[]).includes(value);
 }
 
+const SQLITE_UTC_TIMESTAMP_REGEX = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
+
+function normalizeTimestamp(value?: string): string | null {
+  if (!value) return null;
+
+  // SQLite CURRENT_TIMESTAMP is stored as UTC without a timezone suffix.
+  // Normalize it here so every task reader returns canonical ISO strings and
+  // the board never interprets fresh rows as local-time hours off.
+  const normalizedValue = SQLITE_UTC_TIMESTAMP_REGEX.test(value)
+    ? `${value.replace(' ', 'T')}Z`
+    : value;
+
+  const parsed = new Date(normalizedValue);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  return parsed.toISOString();
+}
+
+function normalizeTaskRow(row: TaskRow): TaskRow {
+  return {
+    ...row,
+    created_at: normalizeTimestamp(row.created_at) ?? row.created_at,
+    updated_at: normalizeTimestamp(row.updated_at) ?? row.updated_at,
+  };
+}
+
 export const tasksDb = {
   createTask(input: {
     projectPath: string;
@@ -30,17 +58,19 @@ export const tasksDb = {
       VALUES (?, ?, ?, ?, 'backlog', ?, ?, ?)
       RETURNING *
     `).get(taskId, input.projectPath, input.title, input.description ?? null, input.executorProvider, input.executorModel ?? null, position) as TaskRow;
-    return row;
+    return normalizeTaskRow(row);
   },
 
   getTask(taskId: string): TaskRow | null {
     const db = getConnection();
-    return (db.prepare('SELECT * FROM tasks WHERE task_id = ?').get(taskId) as TaskRow | undefined) ?? null;
+    const row = db.prepare('SELECT * FROM tasks WHERE task_id = ?').get(taskId) as TaskRow | undefined;
+    return row ? normalizeTaskRow(row) : null;
   },
 
   getTaskBySessionId(sessionId: string): TaskRow | null {
     const db = getConnection();
-    return (db.prepare('SELECT * FROM tasks WHERE session_id = ?').get(sessionId) as TaskRow | undefined) ?? null;
+    const row = db.prepare('SELECT * FROM tasks WHERE session_id = ?').get(sessionId) as TaskRow | undefined;
+    return row ? normalizeTaskRow(row) : null;
   },
 
   listTasks(filter: { projectPath?: string; status?: TaskStatus } = {}): TaskRow[] {
@@ -56,7 +86,7 @@ export const tasksDb = {
       params.push(filter.status);
     }
     const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
-    return db.prepare(`SELECT * FROM tasks ${where} ORDER BY position ASC, created_at ASC`).all(...params) as TaskRow[];
+    return (db.prepare(`SELECT * FROM tasks ${where} ORDER BY position ASC, created_at ASC`).all(...params) as TaskRow[]).map(normalizeTaskRow);
   },
 
   updateTask(taskId: string, updates: {
