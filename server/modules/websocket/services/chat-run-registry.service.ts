@@ -404,6 +404,18 @@ export const chatRunRegistry = {
   },
 
   /**
+   * Returns the set of app session ids that currently have at least one pending
+   * tool-approval request. The task service decorates task rows with this so the
+   * board can reconstruct its live "等你批准" overlay on load/reconnect — without
+   * it, a marker that fired while the board tab was closed could never reappear
+   * (the chat page self-heals via `getPendingApprovalsForSession` on subscribe,
+   * but the board only listened to one-shot `task_upserted` events).
+   */
+  listPendingApprovalSessions(): Set<string> {
+    return new Set(approvalRequestToSession.values());
+  },
+
+  /**
    * Resolves the app session id that owns a pending permission request and
    * forgets the mapping (the approval is being decided). Returns `null` when
    * the requestId is unknown — e.g. the request predates this server process.

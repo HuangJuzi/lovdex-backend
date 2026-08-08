@@ -660,4 +660,11 @@ export type TaskRow = {
   completed_at: string | null;
   created_at: string;
   updated_at: string;
+  /**
+   * Realtime-only flag (never persisted): true when the linked session currently
+   * has a pending tool-approval request. Decorated by the tasks service from the
+   * chat run registry so the board can reconstruct its "等你批准" overlay on
+   * load/reconnect — absent on raw DB rows.
+   */
+  approval_pending?: boolean;
 };

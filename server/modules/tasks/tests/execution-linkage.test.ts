@@ -157,3 +157,46 @@ test('onSessionApproval broadcasts approval marker without changing status', () 
   svc.onSessionApproval('s1', false);
   assert.equal((events[1] as { approval?: { pending: boolean } }).approval?.pending, false);
 });
+
+test('listTasks decorates approval_pending from the injected pending-sessions set', () => {
+  const rows = [
+    makeRow({ task_id: 't1', status: 'in_progress', session_id: 's1' }),
+    makeRow({ task_id: 't2', status: 'in_progress', session_id: 's2' }),
+    makeRow({ task_id: 't3', status: 'todo', session_id: null }),
+  ];
+  const svc = createTasksService(makeDb(rows), {
+    broadcast: () => {},
+    getPendingApprovalSessions: () => new Set(['s1']),
+  });
+  const list = svc.listTasks();
+  const byId = Object.fromEntries(list.map((t) => [t.task_id, t]));
+  assert.equal(byId.t1.approval_pending, true);
+  assert.equal(byId.t2.approval_pending, false);
+  assert.equal(byId.t3.approval_pending, false);
+});
+
+test('getTask decorates approval_pending so the detail page reconstructs the marker', () => {
+  const rows = [makeRow({ status: 'in_progress', session_id: 's1' })];
+  const svc = createTasksService(makeDb(rows), {
+    broadcast: () => {},
+    getPendingApprovalSessions: () => new Set(['s1']),
+  });
+  assert.equal(svc.getTask('t1')?.approval_pending, true);
+});
+
+test('onSessionApproval stamps approval_pending on the broadcast task row', () => {
+  const rows = [makeRow({ status: 'in_progress', session_id: 's1' })];
+  const events: unknown[] = [];
+  const svc = createTasksService(makeDb(rows), {
+    broadcast: (e) => events.push(e),
+    getPendingApprovalSessions: () => new Set(['s1']),
+  });
+  svc.onSessionApproval('s1', true);
+  assert.equal((events[0] as { task: { approval_pending?: boolean } }).task.approval_pending, true);
+});
+
+test('approval_pending defaults to false when no pending-sessions source is wired', () => {
+  const rows = [makeRow({ status: 'in_progress', session_id: 's1' })];
+  const svc = createTasksService(makeDb(rows), { broadcast: () => {} });
+  assert.equal(svc.getTask('t1')?.approval_pending, false);
+});

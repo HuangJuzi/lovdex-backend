@@ -14,7 +14,7 @@ import mime from 'mime-types';
 import { AppError, WORKSPACES_ROOT, validateWorkspacePath } from '@/shared/utils.js';
 import { closeSessionsWatcher, initializeSessionsWatcher } from '@/modules/providers/index.js';
 import { createWebSocketServer, connectedClients, WS_OPEN_STATE } from '@/modules/websocket/index.js';
-import { setTaskLinkage } from '@/modules/websocket/services/chat-run-registry.service.js';
+import { chatRunRegistry, setTaskLinkage } from '@/modules/websocket/services/chat-run-registry.service.js';
 
 import { getConnectableHost } from '../shared/networkHosts.js';
 
@@ -171,7 +171,13 @@ const broadcastTask = (event) => {
         if (client.readyState === WS_OPEN_STATE) client.send(JSON.stringify(event));
     });
 };
-const tasksService = createTasksService(tasksDb, { broadcast: broadcastTask, deps: { projectsDb } });
+const tasksService = createTasksService(tasksDb, {
+    broadcast: broadcastTask,
+    deps: { projectsDb },
+    // Reconstruct the board's "等你批准" overlay on load/reconnect by reading
+    // which sessions currently have pending tool approvals from the run registry.
+    getPendingApprovalSessions: () => chatRunRegistry.listPendingApprovalSessions(),
+});
 // Wire session lifecycle → task status transitions (task↔session linkage).
 setTaskLinkage(tasksService);
 app.use('/api/tasks', authenticateToken, buildTasksRouter(tasksService, {

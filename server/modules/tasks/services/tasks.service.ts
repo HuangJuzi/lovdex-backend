@@ -57,13 +57,38 @@ export function createTasksService(
   opts: {
     broadcast: TaskBroadcast;
     deps?: { projectsDb?: typeof projectsDb };
+    /**
+     * Returns the app session ids that currently have a pending tool-approval
+     * request. Used to decorate task rows with `approval_pending` so the board
+     * can reconstruct its "等你批准" overlay on load/reconnect instead of
+     * relying solely on one-shot `task_upserted` events that fire while the tab
+     * may be closed. Defaults to "no pending sessions" so unit tests that don't
+     * care about approvals are unaffected.
+     */
+    getPendingApprovalSessions?: () => Set<string>;
   },
 ) {
   const resolveDb = db;
   const resolveProject = opts.deps?.projectsDb ?? projectsDb;
+  const pendingApprovalSessions = opts.getPendingApprovalSessions ?? (() => new Set<string>());
+
+  /**
+   * Stamps a realtime `approval_pending` flag onto a task row. The flag is never
+   * persisted — it is recomputed from the chat run registry's in-memory pending
+   * set on every read, so the board sees the truth whether it loaded the list
+   * fresh, reconnected after a WS drop, or received a live upsert.
+   */
+  function decorate(row: TaskRow): TaskRow {
+    const pending = Boolean(row.session_id) && pendingApprovalSessions().has(row.session_id as string);
+    return { ...row, approval_pending: pending };
+  }
 
   function emit(event: TaskEventInput): void {
-    opts.broadcast({ ...event, timestamp: new Date().toISOString() });
+    if (event.kind === 'task_upserted') {
+      opts.broadcast({ ...event, task: decorate(event.task), timestamp: new Date().toISOString() });
+    } else {
+      opts.broadcast({ ...event, timestamp: new Date().toISOString() });
+    }
   }
 
   function applyStatusChange(taskId: string, status: TaskStatus, actor: 'user' | 'engine'): TaskRow | null {
@@ -75,7 +100,7 @@ export function createTasksService(
     resolveDb.updateTaskStatus(taskId, status);
     const updated = resolveDb.getTask(taskId) ?? row;
     emit({ kind: 'task_upserted', task: updated, actor });
-    return updated;
+    return decorate(updated);
   }
 
   return {
@@ -102,18 +127,19 @@ export function createTasksService(
         executorModel: input.executorModel ?? null,
       });
       emit({ kind: 'task_upserted', task: row, actor: 'user' });
-      return row;
+      return decorate(row);
     },
 
     getTask(taskId: string): TaskRow | null {
-      return resolveDb.getTask(taskId);
+      const row = resolveDb.getTask(taskId);
+      return row ? decorate(row) : null;
     },
 
     listTasks(filter: { projectPath?: string; status?: TaskStatus } = {}): TaskRow[] {
       if (filter.status !== undefined && !isTaskStatus(filter.status)) {
         throw new AppError(`invalid status: ${String(filter.status)}`, { code: 'INVALID_STATUS', statusCode: 400 });
       }
-      return resolveDb.listTasks(filter);
+      return resolveDb.listTasks(filter).map(decorate);
     },
 
     applyStatusChange,
@@ -127,7 +153,7 @@ export function createTasksService(
       }
       const row = resolveDb.updateTask(taskId, updates);
       if (row) emit({ kind: 'task_upserted', task: row, actor: 'user' });
-      return row;
+      return row ? decorate(row) : null;
     },
 
     deleteTask(taskId: string): void {
@@ -142,7 +168,7 @@ export function createTasksService(
       resolveDb.moveTask(taskId, status, beforeId, afterId);
       const row = resolveDb.getTask(taskId);
       if (row) emit({ kind: 'task_upserted', task: row, actor: 'user' });
-      return row;
+      return row ? decorate(row) : null;
     },
 
     startExecution(
