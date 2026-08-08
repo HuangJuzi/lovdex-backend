@@ -15,6 +15,8 @@ type StoredTask = {
   executor_model: string | null;
   position: number;
   session_id: string | null;
+  started_at: string | null;
+  completed_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -31,6 +33,8 @@ function makeDbStub() {
     executor_model: null,
     position: 1,
     session_id: null,
+    started_at: null,
+    completed_at: null,
     created_at: '2026-01-01T00:00:00.000Z',
     updated_at: '2026-01-01T00:00:00.000Z',
   });
@@ -142,4 +146,32 @@ test('startExecution links a session and returns its id', () => {
   const result = svc.startExecution('t1', (provider, projectPath) => `session-${provider}-${projectPath}`);
   assert.deepEqual(result, { sessionId: 'session-claude-/p' });
   assert.deepEqual(calls.linkSession, [{ taskId: 't1', sessionId: 'session-claude-/p' }]);
+});
+
+test('getTaskBySessionId returns the decorated task for a linked session', () => {
+  const row: StoredTask = {
+    task_id: 't1', project_path: '/p', title: 't', description: null,
+    status: 'in_progress', executor_provider: 'claude', executor_model: null,
+    position: 0, session_id: 's1', started_at: null, completed_at: null,
+    created_at: '2026-01-01T00:00:00.000Z', updated_at: '2026-01-01T00:00:00.000Z',
+  };
+  const db = {
+    createTask: () => row,
+    getTask: (id: string) => (id === 't1' ? row : null),
+    getTaskBySessionId: (sid: string) => (sid === 's1' ? row : null),
+    listTasks: () => [row],
+    updateTask: () => row,
+    updateTaskStatus: () => {},
+    linkSession: () => {},
+    deleteTask: () => {},
+    moveTask: () => {},
+  } as unknown as TaskDbLike;
+  const svc = createTasksService(db, {
+    broadcast: () => {},
+    getPendingApprovalSessions: () => new Set(['s1']),
+  });
+  const got = svc.getTaskBySessionId('s1');
+  assert.equal(got?.task_id, 't1');
+  assert.equal(got?.approval_pending, true);
+  assert.equal(svc.getTaskBySessionId('nope'), null);
 });

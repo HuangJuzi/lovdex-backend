@@ -135,6 +135,11 @@ export function createTasksService(
       return row ? decorate(row) : null;
     },
 
+    getTaskBySessionId(sessionId: string): TaskRow | null {
+      const row = resolveDb.getTaskBySessionId(sessionId);
+      return row ? decorate(row) : null;
+    },
+
     listTasks(filter: { projectPath?: string; status?: TaskStatus } = {}): TaskRow[] {
       if (filter.status !== undefined && !isTaskStatus(filter.status)) {
         throw new AppError(`invalid status: ${String(filter.status)}`, { code: 'INVALID_STATUS', statusCode: 400 });
