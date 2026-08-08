@@ -38,6 +38,18 @@ export function buildTasksRouter(tasksService: TasksService, deps: { createSessi
     }),
   );
 
+  // GET /api/tasks/by-session/:sessionId  (must precede /:taskId so "by-session"
+  // isn't captured as a taskId param)
+  router.get(
+    '/by-session/:sessionId',
+    asyncHandler(async (req, res) => {
+      const sessionId = String(req.params.sessionId);
+      const task = tasksService.getTaskBySessionId(sessionId);
+      if (!task) throw new AppError('task not found', { code: 'TASK_NOT_FOUND', statusCode: 404 });
+      res.json({ task });
+    }),
+  );
+
   // GET /api/tasks/:taskId
   router.get(
     '/:taskId',
