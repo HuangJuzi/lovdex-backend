@@ -81,6 +81,49 @@ test('models command falls back to claude for unsupported providers', async () =
   }
 });
 
+test('models command shows the requested model when no session is active', async () => {
+  const originalGetProviderModels = providerModelsService.getProviderModels;
+  const originalGetCurrentActiveModel = providerModelsService.getCurrentActiveModel;
+  let getCurrentActiveModelCalls = 0;
+
+  providerModelsService.getProviderModels = async () => ({
+    models: {
+      OPTIONS: [
+        { value: 'default', label: 'Default (recommended)' },
+        { value: 'sonnet', label: 'Sonnet' },
+      ],
+      DEFAULT: 'default',
+    },
+    cache: {
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      expiresAt: '2026-01-04T00:00:00.000Z',
+      source: 'fresh',
+    },
+  });
+  providerModelsService.getCurrentActiveModel = async () => {
+    getCurrentActiveModelCalls += 1;
+    return { model: 'default' };
+  };
+
+  try {
+    const result = await executeModelsCommand([], {
+      provider: 'claude',
+      model: 'sonnet',
+      // no sessionId — simulates a brand-new chat before the first response
+    });
+
+    assert.equal(
+      result.data.current.model,
+      'sonnet',
+      'no-session /model should reflect the frontend-selected model, not the hardcoded default',
+    );
+    assert.equal(getCurrentActiveModelCalls, 0);
+  } finally {
+    providerModelsService.getProviderModels = originalGetProviderModels;
+    providerModelsService.getCurrentActiveModel = originalGetCurrentActiveModel;
+  }
+});
+
 test('built-in commands include /resume as a ui-overlay command', () => {
   const resume = builtInCommands.find((cmd) => cmd.name === '/resume');
   assert.ok(resume, '/resume should be a built-in command');

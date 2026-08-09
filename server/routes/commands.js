@@ -34,16 +34,23 @@ const readModelProvider = (value) => {
 const hasConcreteSessionId = (value) =>
   typeof value === "string" && value.trim().length > 0;
 
-const resolveCommandModel = async (provider, catalog, sessionId) => {
+// When there is no active session yet (e.g. a brand-new chat before the first
+// response), the backend has no jsonl transcript to read the active model from.
+// Previously this fell back to the provider's hardcoded `catalog.DEFAULT`, so
+// the /model modal always showed "default" even right after the user picked a
+// concrete model — the user's selection lives in the frontend's localStorage
+// (`claude-model` etc.) and is passed back here as `context.model`. Prefer that
+// requested model so the modal reflects what the next response will actually use.
+const resolveCommandModel = async (provider, catalog, sessionId, requestedModel) => {
   if (!hasConcreteSessionId(sessionId)) {
-    return catalog.DEFAULT;
+    return requestedModel || catalog.DEFAULT;
   }
 
   const currentActiveModel = await providerModelsService.getCurrentActiveModel(
     provider,
     sessionId,
   );
-  return currentActiveModel?.model || catalog.DEFAULT;
+  return currentActiveModel?.model || requestedModel || catalog.DEFAULT;
 };
 
 export const executeModelsCommand = async (args, context) => {
@@ -54,6 +61,7 @@ export const executeModelsCommand = async (args, context) => {
     currentProvider,
     catalog,
     context?.sessionId,
+    context?.model,
   );
   const availableModels = catalog.OPTIONS.map((option) => option.value);
   const availableOptions = catalog.OPTIONS.map((option) => ({
@@ -318,7 +326,12 @@ Custom commands can be created in:
     const tokenUsage = context?.tokenUsage || {};
     const provider = readModelProvider(context?.provider);
     const catalog = (await providerModelsService.getProviderModels(provider)).models;
-    const model = await resolveCommandModel(provider, catalog, context?.sessionId);
+    const model = await resolveCommandModel(
+      provider,
+      catalog,
+      context?.sessionId,
+      context?.model,
+    );
 
     const reportedUsed =
       Number(
@@ -421,7 +434,12 @@ Custom commands can be created in:
 
     const statusProvider = readModelProvider(context?.provider);
     const statusCatalog = (await providerModelsService.getProviderModels(statusProvider)).models;
-    const model = await resolveCommandModel(statusProvider, statusCatalog, context?.sessionId);
+    const model = await resolveCommandModel(
+      statusProvider,
+      statusCatalog,
+      context?.sessionId,
+      context?.model,
+    );
     const memoryUsage = process.memoryUsage();
 
     return {
