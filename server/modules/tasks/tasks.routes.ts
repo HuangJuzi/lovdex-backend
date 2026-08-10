@@ -70,7 +70,7 @@ export function buildTasksRouter(tasksService: TasksService, deps: { createSessi
       if (body.status !== undefined && (typeof body.status !== 'string' || !isTaskStatus(body.status))) {
         throw new AppError(`invalid status: ${String(body.status)}`, { code: 'INVALID_STATUS', statusCode: 400 });
       }
-      const hasFieldUpdates = ['title', 'description', 'executorProvider', 'executorModel', 'sessionId'].some((k) => body[k] !== undefined);
+      const hasFieldUpdates = ['title', 'description', 'executorProvider', 'executorModel', 'sessionId', 'projectPath'].some((k) => body[k] !== undefined);
       if (typeof body.status === 'string' && hasFieldUpdates) {
         throw new AppError('cannot update status and fields in the same request', { code: 'INVALID_REQUEST', statusCode: 400 });
       }
@@ -89,6 +89,7 @@ export function buildTasksRouter(tasksService: TasksService, deps: { createSessi
         executorProvider?: TaskEngine;
         executorModel?: string | null;
         sessionId?: string | null;
+        projectPath?: string;
       } = {};
       if (typeof body.title === 'string') updates.title = body.title;
       if (typeof body.description === 'string') updates.description = body.description;
@@ -96,7 +97,8 @@ export function buildTasksRouter(tasksService: TasksService, deps: { createSessi
       if (typeof body.executorProvider === 'string') updates.executorProvider = body.executorProvider as TaskEngine;
       if (typeof body.executorModel === 'string') updates.executorModel = body.executorModel;
       if (typeof body.sessionId === 'string' || body.sessionId === null) updates.sessionId = body.sessionId;
-      const row = tasksService.updateTask(taskId, updates);
+      if (typeof body.projectPath === 'string') updates.projectPath = body.projectPath;
+      const row = await tasksService.updateTask(taskId, updates);
       if (!row) throw new AppError('task not found', { code: 'TASK_NOT_FOUND', statusCode: 404 });
       res.json(row);
     }),
