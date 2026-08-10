@@ -113,6 +113,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     isArchived BOOLEAN DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    is_operator      INTEGER DEFAULT 0,
     PRIMARY KEY (session_id),
     FOREIGN KEY (project_path) REFERENCES projects(project_path)
     ON DELETE SET NULL
@@ -135,7 +136,11 @@ CREATE TABLE IF NOT EXISTS tasks (
     started_at        DATETIME,
     completed_at      DATETIME,
     created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP
+    updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+    ai_summary       TEXT,
+    verdict          TEXT CHECK (verdict IS NULL OR verdict IN ('done','only_plan','needs_review','blocked')),
+    verdict_reason   TEXT,
+    verdict_at       DATETIME
 );
 `;
 

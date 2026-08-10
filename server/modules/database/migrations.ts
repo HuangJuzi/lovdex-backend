@@ -434,6 +434,10 @@ const migrateTasksTable = (db: Database): void => {
   const taskColumnNames = tasksTableInfo.map((column) => column.name);
   addColumnToTableIfNotExists(db, 'tasks', taskColumnNames, 'started_at', 'DATETIME');
   addColumnToTableIfNotExists(db, 'tasks', taskColumnNames, 'completed_at', 'DATETIME');
+  addColumnToTableIfNotExists(db, 'tasks', taskColumnNames, 'ai_summary', 'TEXT');
+  addColumnToTableIfNotExists(db, 'tasks', taskColumnNames, 'verdict', "TEXT CHECK (verdict IS NULL OR verdict IN ('done','only_plan','needs_review','blocked'))");
+  addColumnToTableIfNotExists(db, 'tasks', taskColumnNames, 'verdict_reason', 'TEXT');
+  addColumnToTableIfNotExists(db, 'tasks', taskColumnNames, 'verdict_at', 'DATETIME');
 };
 
 export const runMigrations = (db: Database) => {
@@ -471,6 +475,7 @@ export const runMigrations = (db: Database) => {
     const sessionsTableInfoForSummary = db.prepare('PRAGMA table_info(sessions)').all() as { name: string }[];
     const sessionColumnNamesForSummary = sessionsTableInfoForSummary.map((column) => column.name);
     addColumnToTableIfNotExists(db, 'sessions', sessionColumnNamesForSummary, 'summary', 'TEXT');
+    addColumnToTableIfNotExists(db, 'sessions', sessionColumnNamesForSummary, 'is_operator', 'INTEGER DEFAULT 0');
 
     ensureProjectsForSessionPaths(db);
 
