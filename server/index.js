@@ -173,7 +173,7 @@ const broadcastTask = (event) => {
 };
 const tasksService = createTasksService(tasksDb, {
     broadcast: broadcastTask,
-    deps: { projectsDb },
+    deps: { projectsDb, sessionsDb },
     // Reconstruct the board's "等你批准" overlay on load/reconnect by reading
     // which sessions currently have pending tool approvals from the run registry.
     getPendingApprovalSessions: () => chatRunRegistry.listPendingApprovalSessions(),

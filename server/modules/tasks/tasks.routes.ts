@@ -33,6 +33,7 @@ export function buildTasksRouter(tasksService: TasksService, deps: { createSessi
         status: body.status as TaskStatus | undefined,
         executorProvider: body.executorProvider as TaskEngine | undefined,
         executorModel: typeof body.executorModel === 'string' ? body.executorModel : null,
+        sessionId: typeof body.sessionId === 'string' ? body.sessionId : null,
       });
       res.status(201).json(task);
     }),
