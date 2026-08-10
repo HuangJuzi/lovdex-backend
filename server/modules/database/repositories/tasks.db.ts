@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 
 import { getConnection } from '@/modules/database/connection.js';
-import type { TaskEngine, TaskRow, TaskStatus } from '@/shared/types.js';
+import { isTaskVerdict } from '@/shared/types.js';
+import type { TaskEngine, TaskRow, TaskStatus, TaskVerdict } from '@/shared/types.js';
 
 export const TASK_STATUSES: readonly TaskStatus[] = ['backlog', 'todo', 'in_progress', 'in_review', 'done'];
 export const TASK_ENGINES: readonly TaskEngine[] = ['claude', 'codex'];
@@ -155,6 +156,25 @@ export const tasksDb = {
     if (!current) return;
     const sets = ['status = ?', 'updated_at = CURRENT_TIMESTAMP', ...statusTimestampSets(current.status, status)];
     db.prepare(`UPDATE tasks SET ${sets.join(', ')} WHERE task_id = ?`).run(status, taskId);
+  },
+
+  /**
+   * Persist the operator agent's post-run verdict on a task: an AI summary,
+   * the verdict bucket, an optional reason, and the moment it was recorded.
+   * Validates the verdict BEFORE touching the DB so an invalid value can never
+   * produce a partial write. Returns the refreshed row (null if the task vanished).
+   */
+  writeSummary(taskId: string, input: { summary: string; verdict: TaskVerdict; reason?: string | null }): TaskRow | null {
+    if (!isTaskVerdict(input.verdict)) {
+      throw new Error(`invalid verdict: ${String(input.verdict)}`);
+    }
+    const db = getConnection();
+    db.prepare(`
+      UPDATE tasks
+      SET ai_summary = ?, verdict = ?, verdict_reason = ?, verdict_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+      WHERE task_id = ?
+    `).run(input.summary, input.verdict, input.reason ?? null, taskId);
+    return tasksDb.getTask(taskId);
   },
 
   linkSession(taskId: string, sessionId: string | null): void {

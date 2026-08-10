@@ -35,6 +35,10 @@ function makeRow(overrides: Partial<Row> = {}): Row {
     completed_at: null,
     created_at: '2026-01-01',
     updated_at: '2026-01-01',
+    ai_summary: null,
+    verdict: null,
+    verdict_reason: null,
+    verdict_at: null,
     ...overrides,
   };
 }
