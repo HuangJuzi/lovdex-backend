@@ -177,6 +177,11 @@ const tasksService = createTasksService(tasksDb, {
     // Reconstruct the board's "等你批准" overlay on load/reconnect by reading
     // which sessions currently have pending tool approvals from the run registry.
     getPendingApprovalSessions: () => chatRunRegistry.listPendingApprovalSessions(),
+    // Derive the realtime `failed` flag on in_progress tasks: a run that died
+    // without a terminal success (e.g. backend restart) leaves its session with
+    // no live run, so the board renders a "失败" badge instead of a running
+    // spinner.
+    getRunningSessions: () => new Set(chatRunRegistry.listRunningRuns().map((run) => run.sessionId)),
 });
 // Wire session lifecycle → task status transitions (task↔session linkage).
 setTaskLinkage(tasksService);

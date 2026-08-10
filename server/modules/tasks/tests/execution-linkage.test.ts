@@ -53,18 +53,20 @@ test('session completed advances in_progress → in_review', () => {
   assert.equal(rows[0].status, 'in_review');
 });
 
-test('session failed rolls back in_progress → todo', () => {
+test('session failed keeps the task in_progress but re-emits the row', () => {
   const rows = [makeRow({ status: 'in_progress', session_id: 's1' })];
-  const svc = createTasksService(makeDb(rows), { broadcast: () => {} });
+  const events: unknown[] = [];
+  const svc = createTasksService(makeDb(rows), { broadcast: (e) => events.push(e) });
   svc.onSessionStatus('s1', 'failed');
-  assert.equal(rows[0].status, 'todo');
+  assert.equal(rows[0].status, 'in_progress');
+  assert.equal((events[0] as { kind: string }).kind, 'task_upserted');
 });
 
-test('session aborted leaves status unchanged', () => {
+test('session aborted rolls back in_progress → todo', () => {
   const rows = [makeRow({ status: 'in_progress', session_id: 's1' })];
   const svc = createTasksService(makeDb(rows), { broadcast: () => {} });
   svc.onSessionStatus('s1', 'aborted');
-  assert.equal(rows[0].status, 'in_progress');
+  assert.equal(rows[0].status, 'todo');
 });
 
 test('session event for unknown session is a no-op', () => {
@@ -86,13 +88,14 @@ test('running reopens a done task to in_progress (agent works again)', () => {
   assert.equal(rows[0].status, 'in_progress');
 });
 
-test('running on an already in_progress task is a no-op (no redundant event)', () => {
+test('running on an already in_progress task re-emits to refresh realtime flags', () => {
   const rows = [makeRow({ status: 'in_progress', session_id: 's1' })];
   const events: unknown[] = [];
   const svc = createTasksService(makeDb(rows), { broadcast: (e) => events.push(e) });
   svc.onSessionStatus('s1', 'running');
   assert.equal(rows[0].status, 'in_progress');
-  assert.equal(events.length, 0);
+  assert.equal(events.length, 1);
+  assert.equal((events[0] as { kind: string }).kind, 'task_upserted');
 });
 
 test('in_review resume loop: running → in_progress → completed → in_review', () => {
@@ -113,11 +116,11 @@ test('running broadcast carries actor engine', () => {
   assert.equal((events[0] as { actor: string }).actor, 'engine');
 });
 
-test('failed then running re-enters in_progress (retry loop)', () => {
+test('failed then running stays in_progress (retry loop clears via flag recompute)', () => {
   const rows = [makeRow({ status: 'in_progress', session_id: 's1' })];
   const svc = createTasksService(makeDb(rows), { broadcast: () => {} });
   svc.onSessionStatus('s1', 'failed');
-  assert.equal(rows[0].status, 'todo');
+  assert.equal(rows[0].status, 'in_progress');
   svc.onSessionStatus('s1', 'running');
   assert.equal(rows[0].status, 'in_progress');
 });
@@ -199,4 +202,42 @@ test('approval_pending defaults to false when no pending-sessions source is wire
   const rows = [makeRow({ status: 'in_progress', session_id: 's1' })];
   const svc = createTasksService(makeDb(rows), { broadcast: () => {} });
   assert.equal(svc.getTask('t1')?.approval_pending, false);
+});
+
+test('decorate flags an orphaned in_progress task as failed (no status change)', () => {
+  const rows = [makeRow({ task_id: 't1', status: 'in_progress', session_id: 's1' })];
+  const svc = createTasksService(makeDb(rows), {
+    broadcast: () => {},
+    getRunningSessions: () => new Set([]),
+  });
+  const list = svc.listTasks();
+  assert.equal(rows[0].status, 'in_progress');
+  assert.equal(list[0]?.failed, true);
+});
+
+test('decorate does not flag in_progress tasks with a live run', () => {
+  const rows = [makeRow({ task_id: 't1', status: 'in_progress', session_id: 's1' })];
+  const svc = createTasksService(makeDb(rows), {
+    broadcast: () => {},
+    getRunningSessions: () => new Set(['s1']),
+  });
+  const list = svc.listTasks();
+  assert.equal(list[0]?.failed, false);
+});
+
+test('decorate does not flag non-in_progress tasks even when the session is idle', () => {
+  const rows = [makeRow({ task_id: 't1', status: 'in_review', session_id: 's1' })];
+  const svc = createTasksService(makeDb(rows), {
+    broadcast: () => {},
+    getRunningSessions: () => new Set(),
+  });
+  const list = svc.listTasks();
+  assert.equal(list[0]?.failed, false);
+});
+
+test('failed flag defaults to false when no running-sessions source is wired', () => {
+  const rows = [makeRow({ task_id: 't1', status: 'in_progress', session_id: 's1' })];
+  const svc = createTasksService(makeDb(rows), { broadcast: () => {} });
+  const list = svc.listTasks();
+  assert.equal(list[0]?.failed, false);
 });

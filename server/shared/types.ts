@@ -667,4 +667,11 @@ export type TaskRow = {
    * load/reconnect — absent on raw DB rows.
    */
   approval_pending?: boolean;
+  /**
+   * Realtime-only flag (never persisted): true when the task reads as
+   * in_progress but its linked session has no live run (a failed/orphaned run).
+   * The task keeps its status; the board renders a "失败" badge instead of the
+   * running spinner. Decorated by the tasks service from the run registry.
+   */
+  failed?: boolean;
 };

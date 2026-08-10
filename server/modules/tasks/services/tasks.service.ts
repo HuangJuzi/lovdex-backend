@@ -66,21 +66,46 @@ export function createTasksService(
      * care about approvals are unaffected.
      */
     getPendingApprovalSessions?: () => Set<string>;
+    /**
+     * Returns the app session ids that currently have an actively-running run.
+     * Used to derive the realtime `failed` flag on in_progress tasks: a run that
+     * died without a terminal success (failed run, backend restart, crash,
+     * SIGKILL, hung-then-reaped subprocess) never delivers a `session_status`,
+     * so without this the task would read as "进行中" forever. When provided, a
+     * task whose session has no live run is decorated with `failed: true`.
+     * Defaults to undefined (flag is false) so unit tests and installs without
+     * the chat registry are unaffected.
+     */
+    getRunningSessions?: () => Set<string>;
   },
 ) {
   const resolveDb = db;
   const resolveProject = opts.deps?.projectsDb ?? projectsDb;
   const pendingApprovalSessions = opts.getPendingApprovalSessions ?? (() => new Set<string>());
+  const runningSessions = opts.getRunningSessions;
 
   /**
-   * Stamps a realtime `approval_pending` flag onto a task row. The flag is never
-   * persisted — it is recomputed from the chat run registry's in-memory pending
-   * set on every read, so the board sees the truth whether it loaded the list
-   * fresh, reconnected after a WS drop, or received a live upsert.
+   * Stamps the realtime flags onto a task row. Neither flag is persisted — both
+   * are recomputed from the chat run registry's in-memory sets on every read, so
+   * the board sees the truth whether it loaded the list fresh, reconnected after
+   * a WS drop, or received a live upsert:
+   * - `approval_pending`: the linked session has a pending tool-approval.
+   * - `failed`: the linked session has NO live run while the task reads as
+   *   in_progress. That is the "run died without a terminal success" case —
+   *   failed run, backend restart, crash, SIGKILL, hung-then-reaped subprocess.
+   *   The task keeps its status (and its in_progress column slot); the board
+   *   renders a "失败" badge instead of the running spinner. Opt-in: without a
+   *   `getRunningSessions` source the flag is simply false.
    */
   function decorate(row: TaskRow): TaskRow {
     const pending = Boolean(row.session_id) && pendingApprovalSessions().has(row.session_id as string);
-    return { ...row, approval_pending: pending };
+    const failed = Boolean(
+      runningSessions
+      && row.session_id
+      && row.status === 'in_progress'
+      && !runningSessions().has(row.session_id),
+    );
+    return { ...row, approval_pending: pending, failed };
   }
 
   function emit(event: TaskEventInput): void {
@@ -206,19 +231,31 @@ export function createTasksService(
           // start, but whenever work resumes on a task that had settled into
           // in_review (or a done task the user reopened to ask for more). The
           // board should never show "评审中/已完成" while the agent is typing.
-          // Only an already-running task is left alone (no redundant event).
-          if (row.status !== 'in_progress') applyStatusChange(row.task_id, 'in_progress', 'engine');
+          // An already-running task just re-emits its row so live boards
+          // recompute the realtime flags — e.g. a retry on a failed (still
+          // in_progress) task clears its "失败" badge the moment the fresh run
+          // starts.
+          if (row.status !== 'in_progress') {
+            applyStatusChange(row.task_id, 'in_progress', 'engine');
+          } else {
+            emit({ kind: 'task_upserted', task: row, actor: 'engine' });
+          }
           break;
         case 'completed':
           if (row.status === 'in_progress') applyStatusChange(row.task_id, 'in_review', 'engine');
           break;
         case 'failed':
-          // Guarded rollback: only a task currently in_progress is rolled back to todo.
-          if (row.status === 'in_progress') applyStatusChange(row.task_id, 'todo', 'engine');
+          // A failed run does NOT move the task: it keeps its in_progress slot
+          // and the board surfaces the failure via the realtime `failed` flag
+          // (recomputed on every read from the run registry). Emit the row so
+          // live boards swap the running spinner for the "失败" badge.
+          if (row.status === 'in_progress') emit({ kind: 'task_upserted', task: row, actor: 'engine' });
           break;
         case 'aborted':
-          // Deliberate no-op: the task stays in_progress because the user may resume
-          // the aborted session (e.g. continue the conversation).
+          // The human stopped the run: roll back to todo so the board stops
+          // reading as "进行中". The linked session is preserved, so the user
+          // can still resume it (打开会话) or start a fresh run.
+          if (row.status === 'in_progress') applyStatusChange(row.task_id, 'todo', 'engine');
           break;
         default:
           break;
