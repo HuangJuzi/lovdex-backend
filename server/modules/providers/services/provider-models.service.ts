@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
+import { sessionsDb } from '@/modules/database/index.js';
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
 import type { IProvider } from '@/shared/interfaces.js';
 import type {
@@ -330,7 +331,15 @@ export const createProviderModelsService = (dependencies: ProviderModelsServiceD
       return normalizedRequestedModel || undefined;
     }
 
-    const changedModel = await getChangedActiveModel(provider, sessionId);
+    // The runtime receives the provider-native session id (what its CLI/SDK
+    // resumes with), but the persisted model change is keyed by the app session
+    // id — that's what the /model modal sends. Translate before reading, or the
+    // selection made in the modal is never applied on the next turn and the
+    // actual model silently stays on whatever the request default was.
+    const appSessionRow = sessionsDb.getSessionByProviderSessionId(sessionId);
+    const appSessionId = appSessionRow?.session_id || sessionId;
+
+    const changedModel = await getChangedActiveModel(provider, appSessionId);
     if (changedModel.supported && changedModel.changed && changedModel.model?.trim()) {
       return changedModel.model.trim();
     }
