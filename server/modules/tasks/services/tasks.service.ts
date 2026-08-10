@@ -1,7 +1,8 @@
 import { projectsDb, sessionsDb } from '@/modules/database/index.js';
 import { isTaskEngine, isTaskStatus, TASK_STATUSES, tasksDb } from '@/modules/database/repositories/tasks.db.js';
+import { DEFAULT_OPERATOR_CONFIG, type OperatorConfig } from '@/modules/operators/operator.config.js';
 import { AppError, normalizeProjectPath } from '@/shared/utils.js';
-import type { TaskEngine, TaskRow, TaskStatus } from '@/shared/types.js';
+import type { TaskEngine, TaskRow, TaskStatus, TaskVerdict } from '@/shared/types.js';
 
 export const STATUS_ORDER: readonly TaskStatus[] = TASK_STATUSES;
 
@@ -28,6 +29,7 @@ export type TaskDbLike = Pick<
   | 'linkSession'
   | 'deleteTask'
   | 'moveTask'
+  | 'writeSummary'
 >;
 
 type CreateTaskInput = {
@@ -82,6 +84,13 @@ export function createTasksService(
      * the chat registry are unaffected.
      */
     getRunningSessions?: () => Set<string>;
+    /**
+     * Returns the current operator agent configuration. Used by applyVerdict to
+     * decide whether an auto-verdict should also auto-move the task column
+     * (only_plan → todo, done → done). Defaults to DEFAULT_OPERATOR_CONFIG so
+     * unit tests and installs without the config repo are unaffected.
+     */
+    getOperatorConfig?: () => OperatorConfig;
   },
 ) {
   const resolveDb = db;
@@ -341,6 +350,47 @@ export function createTasksService(
       const row = resolveDb.getTaskBySessionId(sessionId);
       if (!row) return;
       emit({ kind: 'task_upserted', task: row, actor: 'engine', approval: { pending } });
+    },
+
+    /**
+     * Persist the operator agent's post-run verdict (AI summary + verdict bucket +
+     * optional reason) on a task. Broadcasts a task_upserted so live boards swap
+     * the in_review card for the verdict badge the moment the run settles. The
+     * verdict column itself is written by the db layer; this method is the
+     * service-side wrapper that also fires the realtime event.
+     */
+    writeSummary(
+      taskId: string,
+      input: { summary: string; verdict: TaskVerdict; reason?: string | null },
+    ): TaskRow | null {
+      const row = resolveDb.writeSummary(taskId, input);
+      if (row) emit({ kind: 'task_upserted', task: row, actor: 'engine' });
+      return row ? decorate(row) : null;
+    },
+
+    /**
+     * Apply the auto-move policy for an operator verdict. Called after a verdict
+     * is recorded (writeSummary or an external caller) to advance the task's
+     * column per the operator config:
+     * - only_plan + auto_move_only_plan_to_todo + in_review → todo
+     * - done + auto_move_done + in_review → done
+     * - needs_review / blocked: stay in in_review (human decides)
+     * When auto_move_enabled is off (or no config source), the column is left
+     * untouched. Returns the (possibly moved) decorated row.
+     */
+    applyVerdict(taskId: string, verdict: TaskVerdict): TaskRow | null {
+      const cfg = opts.getOperatorConfig?.() ?? DEFAULT_OPERATOR_CONFIG;
+      const row = resolveDb.getTask(taskId);
+      if (!row) return null;
+      if (cfg.auto_move_enabled) {
+        if (verdict === 'only_plan' && cfg.auto_move_only_plan_to_todo && row.status === 'in_review') {
+          applyStatusChange(taskId, 'todo', 'engine');
+        } else if (verdict === 'done' && cfg.auto_move_done && row.status === 'in_review') {
+          applyStatusChange(taskId, 'done', 'engine');
+        }
+        // needs_review / blocked: stay in in_review
+      }
+      return decorate(resolveDb.getTask(taskId) ?? row);
     },
   };
 }
