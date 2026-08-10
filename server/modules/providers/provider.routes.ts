@@ -533,8 +533,17 @@ router.post(
     const body = (req.body ?? {}) as Record<string, unknown>;
     const provider = parseProvider(body.provider);
     const projectPath = typeof body.projectPath === 'string' ? body.projectPath : '';
-    const result = sessionsService.createAppSession(provider, projectPath);
+    const isOperator = body.isOperator === true;
+    const result = sessionsService.createAppSession(provider, projectPath, isOperator);
     res.status(201).json(createApiSuccessResponse(result));
+  }),
+);
+
+router.get(
+  '/sessions/operator',
+  asyncHandler(async (_req: Request, res: Response) => {
+    const sessions = sessionsService.listOperatorSessions();
+    res.json(createApiSuccessResponse({ sessions }));
   }),
 );
 

@@ -3,6 +3,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 
 import { projectsDb, sessionsDb } from '@/modules/database/index.js';
+import type { SessionRow } from '@/modules/database/repositories/sessions.db.js';
 import { chatRunRegistry } from '@/modules/websocket/index.js';
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
 import { writeCustomNameToDisk } from '@/modules/providers/services/write-custom-name-to-disk.js';
@@ -122,7 +123,11 @@ export const sessionsService = {
    * for the lifetime of the conversation. The provider-native id is mapped to
    * this row later, when the provider runtime announces it mid-run.
    */
-  createAppSession(provider: LLMProvider, projectPath: string): CreateAppSessionResult {
+  createAppSession(
+    provider: LLMProvider,
+    projectPath: string,
+    isOperator?: boolean,
+  ): CreateAppSessionResult {
     const normalizedProjectPath = projectPath.trim();
     if (!normalizedProjectPath) {
       throw new AppError('projectPath is required.', {
@@ -132,13 +137,22 @@ export const sessionsService = {
     }
 
     const sessionId = randomUUID();
-    sessionsDb.createAppSession(sessionId, provider, normalizedProjectPath);
+    sessionsDb.createAppSession(sessionId, provider, normalizedProjectPath, isOperator);
 
     return {
       sessionId,
       provider,
       projectPath: normalizedProjectPath,
     };
+  },
+
+  /**
+   * Lists operator assistant sessions (is_operator = 1, not archived) for the
+   * assistant panel's conversation history. Separate from project session
+   * lists so the assistant panel renders its own history.
+   */
+  listOperatorSessions(): SessionRow[] {
+    return sessionsDb.getOperatorSessions();
   },
 
   /**
