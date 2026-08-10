@@ -37,6 +37,7 @@ import providerRoutes from './modules/providers/provider.routes.js';
 import { assetsRoutes } from './modules/assets/index.js';
 import { initializeDatabase, projectsDb, sessionsDb, tasksDb } from './modules/database/index.js';
 import { buildTasksRouter, createTasksService } from './modules/tasks/index.js';
+import { buildOperatorRouter } from './modules/operators/operator.routes.js';
 import { validateApiKey, authenticateToken, authenticateWebSocket } from './middleware/auth.js';
 import { IS_PLATFORM } from './constants/config.js';
 import { c } from './utils/colors.js';
@@ -188,6 +189,9 @@ setTaskLinkage(tasksService);
 app.use('/api/tasks', authenticateToken, buildTasksRouter(tasksService, {
     createSession: (provider, projectPath) => sessionsDb.createAppSession(crypto.randomUUID(), provider, projectPath),
 }));
+
+// Operator settings API (protected) — read/update operator automation config.
+app.use('/api/operator/settings', authenticateToken, buildOperatorRouter());
 
 // API Routes (protected)
 // /api/config endpoint removed - no longer needed
