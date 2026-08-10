@@ -17,7 +17,7 @@ import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { query } from '@anthropic-ai/claude-agent-sdk';
+import { createSdkMcpServer, query } from '@anthropic-ai/claude-agent-sdk';
 
 import { buildClaudeUserContent, normalizeImageDescriptors } from './shared/image-attachments.js';
 import { CLAUDE_FALLBACK_MODELS } from './modules/providers/list/claude/claude-models.provider.js';
@@ -32,6 +32,10 @@ import {
 import { sessionsService } from './modules/providers/services/sessions.service.js';
 import { providerAuthService } from './modules/providers/services/provider-auth.service.js';
 import { createCompleteMessage, createNormalizedMessage } from './shared/utils.js';
+import { buildOperatorTools } from './modules/operators/operator.tools.js';
+import { getOperatorConfig } from './modules/operators/operator.config.js';
+import { isTaskStatus } from './modules/database/repositories/tasks.db.js';
+import { z } from 'zod';
 
 const activeSessions = new Map();
 const pendingToolApprovals = new Map();
@@ -890,6 +894,215 @@ function reconnectSessionWriter(sessionId, newRawWs) {
   session.writer.updateWebSocket(newRawWs);
   console.log(`[RECONNECT] Writer swapped for session ${sessionId}`);
   return true;
+}
+
+// ---------------------------------------------------------------------------
+// Operator agent: headless verdict run + operator-mode tool wiring
+//
+// The operator agent runs Claude with a CLOSED custom tool set (no Bash/Edit/
+// Write) so it can autonomously read a session transcript and write a task
+// summary + verdict without human interaction. `runOperatorHeadless` is the
+// headless entry point: it builds the operator tools, calls the SDK `query()`,
+// and drains the stream to completion WITHOUT emitting any websocket messages
+// (there is no client watching). Failures are swallowed + logged per spec
+// ("失败 try/catch 记日志，不抛").
+//
+// SDK custom-tool shape (verified against
+// @anthropic-ai/claude-agent-sdk sdk.d.ts):
+//   SdkMcpToolDefinition = { name, description, inputSchema, handler }
+//   handler: (args, extra) => Promise<CallToolResult>
+//   CallToolResult = { content: ContentBlock[], isError?: boolean }
+// Tools are registered via createSdkMcpServer({ name, tools }) → passed to
+// options.mcpServers. Built-in tools are disabled with `tools: []` so only the
+// operator closed set runs — this is the safety boundary.
+// ---------------------------------------------------------------------------
+
+/**
+ * Adapts the real TasksService to the OperatorToolDeps.tasks shape.
+ *
+ * The deps type uses `status?: string` (the model sends arbitrary strings)
+ * while the service uses `status?: TaskStatus`. The service already validates
+ * internally and throws on invalid status, but to keep the type narrowing
+ * explicit and mirror write_task_summary's isTaskVerdict guard, we validate
+ * with isTaskStatus at the adapter boundary and throw a clear error before
+ * delegating. This is the clean assignability resolution (approach a) — no
+ * unsafe cast.
+ */
+export function adaptTasksServiceForOperatorTools(svc) {
+  const assertStatus = (status) => {
+    if (status !== undefined && !isTaskStatus(status)) {
+      throw new Error(`invalid status: ${String(status)}`);
+    }
+  };
+  return {
+    createTask: (i) => {
+      assertStatus(i.status);
+      return svc.createTask({
+        projectPath: i.projectPath,
+        title: i.title,
+        description: i.description,
+        status: i.status,
+      });
+    },
+    listTasks: (f) => {
+      assertStatus(f.status);
+      return svc.listTasks({ projectPath: f.projectPath, status: f.status });
+    },
+    getTask: (id) => svc.getTask(id),
+    writeSummary: (id, i) => svc.writeSummary(id, i),
+    startExecution: (id, createSession) => svc.startExecution(id, createSession),
+    updateTask: (id, u) => svc.updateTask(id, u),
+    moveTask: (id, status, before, after) => {
+      assertStatus(status);
+      return svc.moveTask(id, status, before, after);
+    },
+  };
+}
+
+/**
+ * Converts a JSON-Schema-ish `inputSchema` ({ type:'object', properties,
+ * required }) from buildOperatorTools into a Zod raw shape (the shape the
+ * SDK's SdkMcpToolDefinition.inputSchema expects — verified against
+ * @anthropic-ai/claude-agent-sdk sdk.d.ts: inputSchema is `AnyZodRawShape`,
+ * i.e. `Record<string, ZodType>`, NOT a JSON-schema object). The SDK
+ * createSdkMcpServer throws if handed a plain JSON-schema object
+ * ("inputSchema must be a Zod schema or raw shape").
+ *
+ * Only the subset buildOperatorTools emits is supported: object properties
+ * that are strings, optional or required. Optional → `.optional()`,
+ * required → bare `z.string()`.
+ */
+function jsonSchemaToZodRawShape(inputSchema) {
+  const props = (inputSchema && inputSchema.properties) || {};
+  const required = new Set(inputSchema && Array.isArray(inputSchema.required) ? inputSchema.required : []);
+  const shape = {};
+  for (const [key, def] of Object.entries(props)) {
+    const isRequired = required.has(key);
+    // buildOperatorTools only declares string properties; treat unknown types
+    // as string to stay permissive rather than rejecting.
+    const base = z.string();
+    shape[key] = isRequired ? base : base.optional();
+  }
+  return shape;
+}
+
+/**
+ * Builds the SDK custom-tool array (SdkMcpToolDefinition[]) from the operator
+ * tool set. Each handler is wrapped so its raw return value is normalized into
+ * a CallToolResult ({ content: [{ type:'text', text }] }) as the SDK requires,
+ * and handler errors are surfaced as isError:true results (so the model can
+ * self-correct) rather than thrown protocol errors.
+ */
+export function buildOperatorSdkTools(deps) {
+  const tools = buildOperatorTools(deps);
+  return Object.entries(tools).map(([name, def]) => ({
+    name,
+    description: def.description,
+    inputSchema: jsonSchemaToZodRawShape(def.inputSchema),
+    handler: async (args) => {
+      try {
+        const result = await def.handler(args);
+        const text = typeof result === 'string' ? result : JSON.stringify(result);
+        return { content: [{ type: 'text', text }] };
+      } catch (e) {
+        const msg = e && typeof e.message === 'string' ? e.message : String(e);
+        return { content: [{ type: 'text', text: `Error: ${msg}` }], isError: true };
+      }
+    },
+  }));
+}
+
+/**
+ * Module-level singleton holding the wired operator deps (real tasksService,
+ * projectsDb, sessionsService). Initialized once at app startup via
+ * initOperatorHeadless so runOperatorHeadless can build the closed tool set
+ * without a circular import of index.js. Tests pass `deps` directly to
+ * runOperatorHeadless instead of touching this singleton.
+ */
+let operatorDepsRef = null;
+
+/**
+ * Initializes the operator headless deps at app startup. index.js calls this
+ * after constructing tasksService:
+ *   initOperatorHeadless({
+ *     tasks: adaptTasksServiceForOperatorTools(tasksService),
+ *     projects: projectsDb,
+ *     sessions: sessionsService,
+ *   });
+ */
+export function initOperatorHeadless(deps) {
+  operatorDepsRef = deps;
+}
+
+/**
+ * Headless operator verdict run. Reads a session transcript and writes a task
+ * summary + verdict via the closed operator tool set, with NO websocket
+ * streaming and NO user interaction. Safe to call from automation (T9 trigger).
+ *
+ * @param {object} params
+ * @param {string} params.sessionId  - session whose transcript to judge
+ * @param {string} params.taskId     - task to write the verdict onto
+ * @param {string} params.title      - task title (for the prompt)
+ * @param {string} [params.promptOverride] - replace the default verdict prompt
+ * @param {Function} [params.queryFn] - seam: inject a fake query() for tests
+ * @param {object} [params.config]   - seam: inject operator config for tests
+ * @param {object} [params.deps]     - seam: inject operator tool deps for tests
+ */
+export async function runOperatorHeadless({ sessionId, taskId, title, promptOverride, queryFn, config, deps }) {
+  const cfg = config ?? getOperatorConfig();
+  if (!cfg.enabled || !cfg.auto_verdict_enabled) return;
+
+  const resolvedDeps = deps ?? operatorDepsRef;
+  if (!resolvedDeps) {
+    console.error('[operator-headless] no deps wired — call initOperatorHeadless at startup');
+    return;
+  }
+
+  const prompt = promptOverride ?? cfg.verdict_prompt_override ??
+    `你是 Lovdex Operator。读 session ${sessionId}（任务 ${taskId}: ${title}）的 transcript，判断实际完成度，调 write_task_summary 写入：summary（中文≤3句）、verdict（done|only_plan|needs_review|blocked）、reason（一句）。`;
+
+  try {
+    const sdkTools = buildOperatorSdkTools(resolvedDeps);
+    const operatorServer = createSdkMcpServer({
+      name: 'lovdex-operator',
+      tools: sdkTools,
+      alwaysLoad: true,
+    });
+
+    const sdkOptions = {
+      // Forward host env (ANTHROPIC_API_KEY etc.) to the SDK subprocess.
+      env: { ...process.env },
+      pathToClaudeCodeExecutable: resolveClaudeCodeExecutablePath(process.env.CLAUDE_CLI_PATH),
+      cwd: cfg.workspace,
+      model: cfg.model || CLAUDE_FALLBACK_MODELS.DEFAULT,
+      // Closed tool set: disable ALL built-in tools so only the operator MCP
+      // tools (write_task_summary, get_session_transcript, …) can run. This is
+      // the safety boundary — no Bash/Edit/Write/AskUserQuestion.
+      tools: [],
+      mcpServers: { 'lovdex-operator': operatorServer },
+      // No interactive prompts possible (built-ins disabled, operator tools are
+      // programmatic). bypassPermissions ensures the SDK never blocks waiting
+      // for a human approval that cannot arrive in headless mode.
+      permissionMode: 'bypassPermissions',
+      allowDangerouslySkipPermissions: true,
+      systemPrompt: { type: 'preset', preset: 'claude_code' },
+      settingSources: ['project', 'user', 'local'],
+    };
+
+    const queryToUse = queryFn ?? query;
+    const queryInstance = queryToUse({ prompt, options: sdkOptions });
+
+    // Drain the stream to completion. Headless = no ws: we deliberately do NOT
+    // emit any websocket messages. We only care that write_task_summary was
+    // invoked as a side effect of the agent running to completion.
+    for await (const _message of queryInstance) {
+      // intentionally empty — drain without emitting
+    }
+  } catch (e) {
+    // Per spec: 失败 try/catch 记日志，不抛. A headless verdict failure must
+    // never crash the caller (e.g. the T9 auto-verdict trigger).
+    console.error('[operator-headless] run failed', e);
+  }
 }
 
 // Export public API

@@ -143,13 +143,29 @@ export function buildOperatorTools(deps: OperatorToolDeps) {
         deps.tasks.startExecution(i.taskId, deps.createSession!),
     },
     update_task: {
-      description: 'Update task fields',
+      description:
+        'Update task fields. Use move_task for status changes; update_task is for title/description/executor.',
       inputSchema: {
         type: 'object',
-        properties: { taskId: { type: 'string' } },
+        properties: {
+          taskId: { type: 'string' },
+          title: { type: 'string' },
+          description: { type: 'string' },
+          executorProvider: { type: 'string' },
+          executorModel: { type: 'string' },
+        },
         required: ['taskId'],
       },
-      handler: async (i: { taskId: string }) => deps.tasks.updateTask(i.taskId, i),
+      handler: async (i: {
+        taskId: string;
+        title?: string;
+        description?: string;
+        executorProvider?: string;
+        executorModel?: string;
+      }) => {
+        const { taskId, ...rest } = i;
+        return deps.tasks.updateTask(taskId, rest);
+      },
     },
     move_task: {
       description: 'Move a task to a status',

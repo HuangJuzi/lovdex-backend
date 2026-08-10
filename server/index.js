@@ -24,6 +24,8 @@ import {
     abortClaudeSDKSession,
     resolveToolApproval,
     getPendingApprovalsForSession,
+    adaptTasksServiceForOperatorTools,
+    initOperatorHeadless,
 } from './claude-sdk.js';
 import {
     queryCodex,
@@ -38,6 +40,7 @@ import { assetsRoutes } from './modules/assets/index.js';
 import { initializeDatabase, projectsDb, sessionsDb, tasksDb } from './modules/database/index.js';
 import { buildTasksRouter, createTasksService } from './modules/tasks/index.js';
 import { buildOperatorRouter } from './modules/operators/operator.routes.js';
+import { sessionsService } from './modules/providers/services/sessions.service.js';
 import { validateApiKey, authenticateToken, authenticateWebSocket } from './middleware/auth.js';
 import { IS_PLATFORM } from './constants/config.js';
 import { c } from './utils/colors.js';
@@ -186,6 +189,17 @@ const tasksService = createTasksService(tasksDb, {
 });
 // Wire session lifecycle → task status transitions (task↔session linkage).
 setTaskLinkage(tasksService);
+
+// Wire the operator headless run deps: the real tasksService (adapted so the
+// string-typed operator tool inputs are narrowed to TaskStatus at the boundary),
+// projectsDb, and sessionsService. runOperatorHeadless (in claude-sdk.js) uses
+// these to build the closed operator tool set when auto-verdict runs.
+initOperatorHeadless({
+    tasks: adaptTasksServiceForOperatorTools(tasksService),
+    projects: projectsDb,
+    sessions: sessionsService,
+});
+
 app.use('/api/tasks', authenticateToken, buildTasksRouter(tasksService, {
     createSession: (provider, projectPath) => sessionsDb.createAppSession(crypto.randomUUID(), provider, projectPath),
 }));
