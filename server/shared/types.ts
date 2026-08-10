@@ -692,6 +692,14 @@ export type TaskRow = {
    */
   approval_pending?: boolean;
   /**
+   * Realtime-only (never persisted): the toolName the linked session is
+   * currently waiting on, when `approval_pending` is true. Lets the board
+   * classify the wait reason by tool — AskUserQuestion→"等你回答",
+   * ExitPlanMode→"等你确认计划", other→"等你批准" — instead of a generic label.
+   * Null when not pending. Decorated by the tasks service from the run registry.
+   */
+  pending_tool?: string | null;
+  /**
    * Realtime-only flag (never persisted): true when the task reads as
    * in_progress but its linked session has no live run (a failed/orphaned run).
    * The task keeps its status; the board renders a "失败" badge instead of the

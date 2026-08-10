@@ -187,7 +187,7 @@ test('getTaskBySessionId returns the decorated task for a linked session', () =>
   } as unknown as TaskDbLike;
   const svc = createTasksService(db, {
     broadcast: () => {},
-    getPendingApprovalSessions: () => new Set(['s1']),
+    getPendingApprovalSessions: () => new Map([['s1', 'AskUserQuestion']]),
   });
   const got = svc.getTaskBySessionId('s1');
   assert.equal(got?.task_id, 't1');

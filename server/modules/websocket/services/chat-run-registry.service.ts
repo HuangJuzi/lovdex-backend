@@ -173,6 +173,13 @@ export function getTaskLinkage(): TaskLinkage | null {
  * removed on `permission_cancelled` or once the human responds.
  */
 const approvalRequestToSession = new Map<string, string>();
+/**
+ * Parallel to `approvalRequestToSession`: the toolName for each pending
+ * approval request, so the task board can classify the wait reason
+ * (AskUserQuestion→"等你回答", ExitPlanMode→"等你确认计划", tool permission→"等你批准")
+ * instead of a generic "等你批准". Cleared alongside the session map.
+ */
+const approvalRequestToTool = new Map<string, string>();
 
 /**
  * Evicts every pending permission request owned by one app session. Called on
@@ -184,6 +191,7 @@ function clearApprovalRequestsForSession(appSessionId: string): void {
   for (const [requestId, ownerSessionId] of approvalRequestToSession) {
     if (ownerSessionId === appSessionId) {
       approvalRequestToSession.delete(requestId);
+      approvalRequestToTool.delete(requestId);
     }
   }
 }
@@ -217,12 +225,16 @@ function decorateAndRecordEvent(run: ChatRun, message: NormalizedMessage): Norma
   if (message.kind === 'permission_request') {
     if (typeof message.requestId === 'string' && message.requestId) {
       approvalRequestToSession.set(message.requestId, run.appSessionId);
+      if (typeof message.toolName === 'string' && message.toolName) {
+        approvalRequestToTool.set(message.requestId, message.toolName);
+      }
     }
     taskLinkage?.onSessionApproval(run.appSessionId, true);
   }
   if (message.kind === 'permission_cancelled') {
     if (typeof message.requestId === 'string' && message.requestId) {
       approvalRequestToSession.delete(message.requestId);
+      approvalRequestToTool.delete(message.requestId);
     }
     taskLinkage?.onSessionApproval(run.appSessionId, false);
   }
@@ -404,15 +416,24 @@ export const chatRunRegistry = {
   },
 
   /**
-   * Returns the set of app session ids that currently have at least one pending
-   * tool-approval request. The task service decorates task rows with this so the
-   * board can reconstruct its live "等你批准" overlay on load/reconnect — without
-   * it, a marker that fired while the board tab was closed could never reappear
-   * (the chat page self-heals via `getPendingApprovalsForSession` on subscribe,
-   * but the board only listened to one-shot `task_upserted` events).
+   * Returns a map of app session id → the toolName that session is currently
+   * waiting on (the most recent pending request's tool). The task service
+   * decorates task rows with this so the board can reconstruct its live
+   * "等你回答/等你确认计划/等你批准" overlay on load/reconnect AND classify the wait
+   * reason by tool — without it, a marker that fired while the board tab was
+   * closed could never reappear (the chat page self-heals via
+   * `getPendingApprovalsForSession` on subscribe, but the board only listened
+   * to one-shot `task_upserted` events).
    */
-  listPendingApprovalSessions(): Set<string> {
-    return new Set(approvalRequestToSession.values());
+  listPendingApprovalSessions(): Map<string, string> {
+    const result = new Map<string, string>();
+    for (const [requestId, sessionId] of approvalRequestToSession) {
+      const tool = approvalRequestToTool.get(requestId);
+      // Keep the most recently-seen tool for a session with multiple pending
+      // requests (last write wins via Map insertion order).
+      result.set(sessionId, tool ?? result.get(sessionId ?? '') ?? 'UnknownTool');
+    }
+    return result;
   },
 
   /**
@@ -427,6 +448,7 @@ export const chatRunRegistry = {
     const appSessionId = approvalRequestToSession.get(requestId) ?? null;
     if (appSessionId !== null) {
       approvalRequestToSession.delete(requestId);
+      approvalRequestToTool.delete(requestId);
     }
     return appSessionId;
   },
@@ -523,5 +545,6 @@ export const chatRunRegistry = {
   clearAll(): void {
     runs.clear();
     approvalRequestToSession.clear();
+    approvalRequestToTool.clear();
   },
 };

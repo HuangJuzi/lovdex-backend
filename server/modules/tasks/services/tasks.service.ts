@@ -66,13 +66,14 @@ export function createTasksService(
     };
     /**
      * Returns the app session ids that currently have a pending tool-approval
-     * request. Used to decorate task rows with `approval_pending` so the board
-     * can reconstruct its "等你批准" overlay on load/reconnect instead of
-     * relying solely on one-shot `task_upserted` events that fire while the tab
-     * may be closed. Defaults to "no pending sessions" so unit tests that don't
-     * care about approvals are unaffected.
+     * request, mapped to the toolName each is waiting on. Used to decorate task
+     * rows with `approval_pending` + `pending_tool` so the board can reconstruct
+     * its "等你回答/等你确认计划/等你批准" overlay on load/reconnect AND classify the
+     * wait reason by tool, instead of relying solely on one-shot `task_upserted`
+     * events that fire while the tab may be closed. Defaults to an empty map so
+     * unit tests that don't care about approvals are unaffected.
      */
-    getPendingApprovalSessions?: () => Set<string>;
+    getPendingApprovalSessions?: () => Map<string, string>;
     /**
      * Returns the app session ids that currently have an actively-running run.
      * Used to derive the realtime `failed` flag on in_progress tasks: a run that
@@ -119,7 +120,7 @@ export function createTasksService(
         import('@/modules/providers/services/sessions.service.js').then(({ sessionsService }) =>
           sessionsService.deleteOrArchiveSessionById(sessionId, { force: true, deletedFromDisk: true }),
         ));
-  const pendingApprovalSessions = opts.getPendingApprovalSessions ?? (() => new Set<string>());
+  const pendingApprovalSessions = opts.getPendingApprovalSessions ?? (() => new Map<string, string>());
   const runningSessions = opts.getRunningSessions;
 
   /**
@@ -136,14 +137,15 @@ export function createTasksService(
    *   `getRunningSessions` source the flag is simply false.
    */
   function decorate(row: TaskRow): TaskRow {
-    const pending = Boolean(row.session_id) && pendingApprovalSessions().has(row.session_id as string);
+    const pendingTool = row.session_id ? pendingApprovalSessions().get(row.session_id as string) ?? null : null;
+    const pending = Boolean(row.session_id) && pendingTool !== null;
     const failed = Boolean(
       runningSessions
       && row.session_id
       && row.status === 'in_progress'
       && !runningSessions().has(row.session_id),
     );
-    return { ...row, approval_pending: pending, failed };
+    return { ...row, approval_pending: pending, pending_tool: pendingTool, failed };
   }
 
   function emit(event: TaskEventInput): void {
