@@ -642,6 +642,19 @@ export type WorkspacePathValidationResult = {
 export type TaskStatus = 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'done';
 
 /**
+ * Operator-agent verdicts recorded on a task once execution settles.
+ *
+ * `done` is fully complete, `only_plan` produced a plan without execution,
+ * `needs_review` requires a human decision, and `blocked` hit an unrecoverable
+ * obstacle. Mirrors the `tasks.verdict` CHECK constraint exactly.
+ */
+export type TaskVerdict = 'done' | 'only_plan' | 'needs_review' | 'blocked';
+export const TASK_VERDICTS: readonly TaskVerdict[] = ['done', 'only_plan', 'needs_review', 'blocked'];
+export function isTaskVerdict(value: unknown): value is TaskVerdict {
+  return typeof value === 'string' && (TASK_VERDICTS as readonly string[]).includes(value);
+}
+
+/**
  * Executor engines supported by task execution.
  */
 export type TaskEngine = 'claude' | 'codex';
@@ -667,6 +680,10 @@ export type TaskRow = {
   completed_at: string | null;
   created_at: string;
   updated_at: string;
+  ai_summary: string | null;
+  verdict: TaskVerdict | null;
+  verdict_reason: string | null;
+  verdict_at: string | null;
   /**
    * Realtime-only flag (never persisted): true when the linked session currently
    * has a pending tool-approval request. Decorated by the tasks service from the
