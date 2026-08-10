@@ -146,3 +146,37 @@ test('tasksDb.moveTask within the same column does not re-stamp timestamps', asy
     assert.equal(tasksDb.getTask(created.task_id)?.completed_at, doneAt, 'completed_at unchanged on same-column reorder');
   });
 });
+
+test('tasksDb.createTask honors status + sessionId + lifecycle timestamps', async () => {
+  await withIsolatedDatabase(() => {
+    projectsDb.createProjectPath('/tmp/conv');
+
+    const running = tasksDb.createTask({
+      projectPath: '/tmp/conv',
+      title: 'running',
+      executorProvider: 'claude',
+      status: 'in_progress',
+      sessionId: 'sess-running',
+    });
+    assert.equal(running.status, 'in_progress');
+    assert.equal(running.session_id, 'sess-running');
+    assert.ok(running.started_at, 'started_at set for in_progress');
+
+    const done = tasksDb.createTask({
+      projectPath: '/tmp/conv',
+      title: 'done',
+      executorProvider: 'codex',
+      status: 'done',
+      sessionId: 'sess-done',
+    });
+    assert.equal(done.status, 'done');
+    assert.equal(done.session_id, 'sess-done');
+    assert.ok(done.completed_at, 'completed_at set for done');
+
+    const backlog = tasksDb.createTask({ projectPath: '/tmp/conv', title: 'b', executorProvider: 'claude' });
+    assert.equal(backlog.status, 'backlog');
+    assert.equal(backlog.session_id, null);
+    assert.equal(backlog.started_at, null);
+    assert.equal(backlog.completed_at, null);
+  });
+});

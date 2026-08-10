@@ -69,15 +69,31 @@ export const tasksDb = {
     description?: string | null;
     executorProvider: TaskEngine;
     executorModel?: string | null;
+    status?: TaskStatus;
+    sessionId?: string | null;
   }): TaskRow {
     const db = getConnection();
     const taskId = randomUUID();
-    const position = (db.prepare('SELECT COALESCE(MAX(position), 0) + 1 AS p FROM tasks WHERE status = ?').get('backlog') as { p: number }).p;
+    const status = input.status ?? 'backlog';
+    const position = (db.prepare('SELECT COALESCE(MAX(position), 0) + 1 AS p FROM tasks WHERE status = ?').get(status) as { p: number }).p;
+    // SQLite literals: only write lifecycle timestamps when entering that status (safe, not user input).
+    const startedAtSet = status === 'in_progress' ? 'CURRENT_TIMESTAMP' : 'NULL';
+    const completedAtSet = status === 'done' ? 'CURRENT_TIMESTAMP' : 'NULL';
     const row = db.prepare(`
-      INSERT INTO tasks (task_id, project_path, title, description, status, executor_provider, executor_model, position)
-      VALUES (?, ?, ?, ?, 'backlog', ?, ?, ?)
+      INSERT INTO tasks (task_id, project_path, title, description, status, executor_provider, executor_model, position, session_id, started_at, completed_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ${startedAtSet}, ${completedAtSet})
       RETURNING *
-    `).get(taskId, input.projectPath, input.title, input.description ?? null, input.executorProvider, input.executorModel ?? null, position) as TaskRow;
+    `).get(
+      taskId,
+      input.projectPath,
+      input.title,
+      input.description ?? null,
+      status,
+      input.executorProvider,
+      input.executorModel ?? null,
+      position,
+      input.sessionId ?? null,
+    ) as TaskRow;
     return normalizeTaskRow(row);
   },
 
