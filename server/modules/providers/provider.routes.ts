@@ -1,5 +1,7 @@
 import express, { type Request, type Response } from 'express';
+import fs from 'node:fs';
 
+import { getOperatorConfig } from '@/modules/operators/operator.config.js';
 import { providerAuthService } from '@/modules/providers/services/provider-auth.service.js';
 import { providerCapabilitiesService } from '@/modules/providers/services/provider-capabilities.service.js';
 import { providerMcpService } from '@/modules/providers/services/mcp.service.js';
@@ -532,9 +534,19 @@ router.post(
   asyncHandler(async (req: Request, res: Response) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const provider = parseProvider(body.provider);
-    const projectPath = typeof body.projectPath === 'string' ? body.projectPath : '';
     const isOperator = body.isOperator === true;
-    const result = sessionsService.createAppSession(provider, projectPath, isOperator);
+    // Operator sessions are bound to the operator workspace (configured server-
+    // side, never exposed in the settings page), so a caller creating an
+    // operator session must not pass a projectPath — the backend owns it.
+    if (isOperator) {
+      const workspace = getOperatorConfig().workspace;
+      if (workspace) fs.mkdirSync(workspace, { recursive: true });
+      const result = sessionsService.createAppSession(provider, workspace, true);
+      res.status(201).json(createApiSuccessResponse(result));
+      return;
+    }
+    const projectPath = typeof body.projectPath === 'string' ? body.projectPath : '';
+    const result = sessionsService.createAppSession(provider, projectPath, false);
     res.status(201).json(createApiSuccessResponse(result));
   }),
 );
