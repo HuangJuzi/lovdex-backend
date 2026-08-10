@@ -46,6 +46,16 @@ const resolveCommandModel = async (provider, catalog, sessionId, requestedModel)
     return requestedModel || catalog.DEFAULT;
   }
 
+  // The persisted session model change is the source of truth for what the next
+  // response will actually use (resolveResumeModel applies it on the next turn).
+  // Prefer it over the transcript so the /model modal reflects a selection
+  // immediately instead of only after the next response has run and the jsonl
+  // transcript has caught up.
+  const pendingChange = await providerModelsService.getChangedActiveModel(provider, sessionId);
+  if (pendingChange.supported && pendingChange.changed && pendingChange.model?.trim()) {
+    return pendingChange.model.trim();
+  }
+
   const currentActiveModel = await providerModelsService.getCurrentActiveModel(
     provider,
     sessionId,

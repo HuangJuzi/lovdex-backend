@@ -124,6 +124,55 @@ test('models command shows the requested model when no session is active', async
   }
 });
 
+test('models command prefers a pending session model change over the transcript', async () => {
+  const originalGetProviderModels = providerModelsService.getProviderModels;
+  const originalGetCurrentActiveModel = providerModelsService.getCurrentActiveModel;
+  const originalGetChangedActiveModel = providerModelsService.getChangedActiveModel;
+
+  providerModelsService.getProviderModels = async () => ({
+    models: {
+      OPTIONS: [
+        { value: 'default', label: 'Default (recommended)' },
+        { value: 'opus', label: 'GLM-5.2' },
+      ],
+      DEFAULT: 'default',
+    },
+    cache: {
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      expiresAt: '2026-01-04T00:00:00.000Z',
+      source: 'fresh',
+    },
+  });
+  // Transcript still shows the model that last ran; the pending change is what
+  // the next response will use, and the modal should reflect that immediately.
+  providerModelsService.getCurrentActiveModel = async () => ({ model: 'default' });
+  providerModelsService.getChangedActiveModel = async () => ({
+    provider: 'claude',
+    sessionId: 'sess-1',
+    supported: true,
+    changed: true,
+    model: 'opus',
+  });
+
+  try {
+    const result = await executeModelsCommand([], {
+      provider: 'claude',
+      model: 'default',
+      sessionId: 'sess-1',
+    });
+
+    assert.equal(
+      result.data.current.model,
+      'opus',
+      'a pending model change should win over the transcript model for display',
+    );
+  } finally {
+    providerModelsService.getProviderModels = originalGetProviderModels;
+    providerModelsService.getCurrentActiveModel = originalGetCurrentActiveModel;
+    providerModelsService.getChangedActiveModel = originalGetChangedActiveModel;
+  }
+});
+
 test('built-in commands include /resume as a ui-overlay command', () => {
   const resume = builtInCommands.find((cmd) => cmd.name === '/resume');
   assert.ok(resume, '/resume should be a built-in command');
