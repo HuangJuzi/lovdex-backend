@@ -261,9 +261,15 @@ export class ClaudeProviderModels implements IProviderModels {
     }
 
     try {
-      const jsonlPath = sessionsDb.getSessionById(sessionId)?.jsonl_path;
+      const sessionRow = sessionsDb.getSessionById(sessionId);
+      const jsonlPath = sessionRow?.jsonl_path;
+      // Transcript events carry the provider/CLI session id (provider_session_id),
+      // not the app session id. extractClaudeEventModel skips events whose
+      // sessionId doesn't match, so matching on the wrong id made this lookup
+      // always miss and report the default model instead of the active one.
+      const transcriptSessionId = sessionRow?.provider_session_id?.trim() || sessionId;
       const activeModel = jsonlPath
-        ? await readClaudeSessionModelFromJsonl(sessionId, jsonlPath)
+        ? await readClaudeSessionModelFromJsonl(transcriptSessionId, jsonlPath)
         : null;
       if (activeModel?.model) {
         return activeModel;
