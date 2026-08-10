@@ -1,6 +1,6 @@
 import type { Server as HttpServer } from 'node:http';
 
-import { WebSocketServer, type VerifyClientCallbackSync } from 'ws';
+import { WebSocketServer, type WebSocket, type VerifyClientCallbackSync } from 'ws';
 
 import { handleChatConnection } from '@/modules/websocket/services/chat-websocket.service.js';
 import { verifyWebSocketClient } from '@/modules/websocket/services/websocket-auth.service.js';
@@ -30,19 +30,35 @@ export function createWebSocketServer(
     // AWS ALB 60s, nginx 60s, etc.). Without app-level pings these connections
     // are silently torn down even when the UI is active, causing repeated
     // reconnect cycles. ws library heartbeat is opt-in.
+    //
+    // isAlive tracking doubles as dead-peer detection: a socket that stops
+    // answering pings (client suspended, half-open TCP, proxy gone) is
+    // terminated here so the browser's `onclose` fires and the client
+    // reconnects + resubscribes. Without termination a half-open socket keeps
+    // `readyState === OPEN` on the client forever — it misses every live
+    // stream_delta and only "recovers" after a manual page refresh.
+    const alive = ws as WebSocket & { isAlive?: boolean };
+    alive.isAlive = true;
+    alive.on('pong', () => { alive.isAlive = true; });
+
     const HEARTBEAT_INTERVAL_MS = 30_000;
     const heartbeat = setInterval(() => {
-      if (ws.readyState === ws.OPEN) {
+      if (alive.readyState === alive.OPEN) {
         try {
-          ws.ping();
+          if (alive.isAlive === false) {
+            alive.terminate();
+            return;
+          }
+          alive.isAlive = false;
+          alive.ping();
         } catch {
           // socket may have been closed concurrently — interval will be cleared below
         }
       }
     }, HEARTBEAT_INTERVAL_MS);
     const stopHeartbeat = () => clearInterval(heartbeat);
-    ws.on('close', stopHeartbeat);
-    ws.on('error', stopHeartbeat);
+    alive.on('close', stopHeartbeat);
+    alive.on('error', stopHeartbeat);
 
     const incomingRequest = request as AuthenticatedWebSocketRequest;
     const url = incomingRequest.url ?? '/';
