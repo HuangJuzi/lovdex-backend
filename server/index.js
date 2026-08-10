@@ -40,6 +40,7 @@ import { assetsRoutes } from './modules/assets/index.js';
 import { initializeDatabase, projectsDb, sessionsDb, tasksDb } from './modules/database/index.js';
 import { buildTasksRouter, createTasksService } from './modules/tasks/index.js';
 import { buildOperatorRouter } from './modules/operators/operator.routes.js';
+import { scheduleAutoVerdict } from './modules/operators/operator-verdict.service.js';
 import { sessionsService } from './modules/providers/services/sessions.service.js';
 import { validateApiKey, authenticateToken, authenticateWebSocket } from './middleware/auth.js';
 import { IS_PLATFORM } from './constants/config.js';
@@ -186,6 +187,16 @@ const tasksService = createTasksService(tasksDb, {
     // no live run, so the board renders a "失败" badge instead of a running
     // spinner.
     getRunningSessions: () => new Set(chatRunRegistry.listRunningRuns().map((run) => run.sessionId)),
+    // Auto-verdict trigger (T9): when a non-operator session completes, schedule
+    // a headless operator run that judges the transcript and writes a summary +
+    // verdict onto the task. The is_operator check is the recursion guard —
+    // operator sessions never trigger their own verdict.
+    onTaskCompleted: (taskId, title, sessionId) => {
+        if (!sessionId) return;
+        const sessionRow = sessionsDb.getSessionById(sessionId);
+        const isOperator = Boolean(sessionRow?.is_operator);
+        scheduleAutoVerdict(sessionId, taskId, title, isOperator);
+    },
 });
 // Wire session lifecycle → task status transitions (task↔session linkage).
 setTaskLinkage(tasksService);

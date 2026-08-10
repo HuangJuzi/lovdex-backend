@@ -91,6 +91,15 @@ export function createTasksService(
      * unit tests and installs without the config repo are unaffected.
      */
     getOperatorConfig?: () => OperatorConfig;
+    /**
+     * Fired after a linked session transitions to `completed` (after the
+     * in_progress → in_review move). The auto-verdict trigger (T9) hooks here
+     * to schedule a headless operator run that judges the session and writes a
+     * summary + verdict. Optional so unit tests and installs without the
+     * trigger are unaffected. `sessionId` may be null when the row has no
+     * linked session, in which case the caller typically no-ops.
+     */
+    onTaskCompleted?: (taskId: string, title: string, sessionId: string | null) => void;
   },
 ) {
   const resolveDb = db;
@@ -321,6 +330,11 @@ export function createTasksService(
           break;
         case 'completed':
           if (row.status === 'in_progress') applyStatusChange(row.task_id, 'in_review', 'engine');
+          // Fire the auto-verdict hook AFTER the in_review transition. The T9
+          // trigger attaches here to schedule a headless operator run. Optional
+          // so installs without the trigger (and existing unit tests) are
+          // unaffected.
+          opts.onTaskCompleted?.(row.task_id, row.title, row.session_id);
           break;
         case 'failed':
           // A failed run does NOT move the task: it keeps its in_progress slot
