@@ -49,13 +49,25 @@ function makeDbStub() {
       description?: string | null;
       executorProvider: string;
       executorModel?: string | null;
+      status?: string;
+      sessionId?: string | null;
     }) => {
-      const row = { task_id: 't1', ...input, status: 'backlog' };
+      const row = {
+        task_id: 't1',
+        ...input,
+        status: input.status ?? 'backlog',
+        session_id: input.sessionId ?? null,
+      };
       tasks.set('t1', row as unknown as StoredTask);
       return row;
     },
     getTask: (id: string) => tasks.get(id) ?? null,
-    getTaskBySessionId: () => null,
+    getTaskBySessionId: (sid: string) => {
+      for (const task of tasks.values()) {
+        if (task.session_id === sid) return task;
+      }
+      return null;
+    },
     listTasks: () => [...tasks.values()],
     updateTask: (id: string, updates: Record<string, unknown>) => {
       const current = tasks.get(id);
@@ -310,4 +322,76 @@ test('updateTask: ordinary field updates leave the session untouched', async () 
   assert.equal(row?.title, 'new title');
   assert.equal((db.getTask('t1') as StoredTask).session_id, 's1');
   assert.deepEqual(deleted, []);
+});
+
+type SessionLike = { session_id: string; project_path: string | null };
+
+function makeSessionStub(rows: Record<string, SessionLike>) {
+  return {
+    getSessionById: (sid: string) => rows[sid] ?? null,
+  } as unknown as typeof import('@/modules/database/index.js').sessionsDb;
+}
+
+test('createTask with a sessionId links the task and honors status', () => {
+  const { db } = makeDbStub();
+  const svc = createTasksService(db, {
+    broadcast: () => {},
+    deps: {
+      projectsDb: makeProjectStub('/p'),
+      sessionsDb: makeSessionStub({ s1: { session_id: 's1', project_path: '/p' } }),
+    },
+  });
+  const task = svc.createTask({
+    title: 'x',
+    projectPath: '/p',
+    executorProvider: 'claude',
+    status: 'todo',
+    sessionId: 's1',
+  }) as StoredTask;
+  assert.equal(task.session_id, 's1');
+  assert.equal(task.status, 'todo');
+});
+
+test('createTask with a sessionId rejects an unknown session', () => {
+  const svc = createTasksService(makeDbStub().db, {
+    broadcast: () => {},
+    deps: {
+      projectsDb: makeProjectStub('/p'),
+      sessionsDb: makeSessionStub({}),
+    },
+  });
+  assert.throws(
+    () => svc.createTask({ title: 'x', projectPath: '/p', executorProvider: 'claude', sessionId: 'nope' }),
+    /session not found/,
+  );
+});
+
+test('createTask with a sessionId rejects a session from another project', () => {
+  const svc = createTasksService(makeDbStub().db, {
+    broadcast: () => {},
+    deps: {
+      projectsDb: makeProjectStub('/p'),
+      sessionsDb: makeSessionStub({ s1: { session_id: 's1', project_path: '/other' } }),
+    },
+  });
+  assert.throws(
+    () => svc.createTask({ title: 'x', projectPath: '/p', executorProvider: 'claude', sessionId: 's1' }),
+    /does not belong/,
+  );
+});
+
+test('createTask with a sessionId rejects a session already linked to a task', () => {
+  const { db } = makeDbStub();
+  db.linkSession('t1', 's1');
+  const svc = createTasksService(db, {
+    broadcast: () => {},
+    deps: {
+      projectsDb: makeProjectStub('/p'),
+      sessionsDb: makeSessionStub({ s1: { session_id: 's1', project_path: '/p' } }),
+    },
+  });
+  assert.throws(
+    () => svc.createTask({ title: 'x', projectPath: '/p', executorProvider: 'claude', sessionId: 's1' }),
+    /already linked/,
+  );
 });

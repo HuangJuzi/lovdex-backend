@@ -1,6 +1,6 @@
-import { projectsDb } from '@/modules/database/index.js';
+import { projectsDb, sessionsDb } from '@/modules/database/index.js';
 import { isTaskEngine, isTaskStatus, TASK_STATUSES, tasksDb } from '@/modules/database/repositories/tasks.db.js';
-import { AppError } from '@/shared/utils.js';
+import { AppError, normalizeProjectPath } from '@/shared/utils.js';
 import type { TaskEngine, TaskRow, TaskStatus } from '@/shared/types.js';
 
 export const STATUS_ORDER: readonly TaskStatus[] = TASK_STATUSES;
@@ -37,6 +37,7 @@ type CreateTaskInput = {
   status?: TaskStatus;
   executorProvider?: TaskEngine;
   executorModel?: string | null;
+  sessionId?: string | null;
 };
 
 /**
@@ -58,6 +59,7 @@ export function createTasksService(
     broadcast: TaskBroadcast;
     deps?: {
       projectsDb?: typeof projectsDb;
+      sessionsDb?: typeof sessionsDb;
       deleteSessionHard?: (sessionId: string) => Promise<void>;
     };
     /**
@@ -84,6 +86,9 @@ export function createTasksService(
 ) {
   const resolveDb = db;
   const resolveProject = opts.deps?.projectsDb ?? projectsDb;
+  const resolveSession =
+    opts.deps?.sessionsDb?.getSessionById
+    ?? ((_sessionId: string) => null);
 
   /**
    * Hard-deletes a session row plus its transcript file. Production default is a
@@ -159,12 +164,26 @@ export function createTasksService(
       if (!project) {
         throw new AppError(`project not found: ${input.projectPath}`, { code: 'PROJECT_NOT_FOUND', statusCode: 404 });
       }
+      if (input.sessionId != null) {
+        const session = resolveSession(input.sessionId);
+        if (!session) {
+          throw new AppError(`session not found: ${input.sessionId}`, { code: 'SESSION_NOT_FOUND', statusCode: 404 });
+        }
+        if (normalizeProjectPath(session.project_path ?? '') !== normalizeProjectPath(input.projectPath)) {
+          throw new AppError('session does not belong to this project', { code: 'SESSION_PROJECT_MISMATCH', statusCode: 409 });
+        }
+        if (resolveDb.getTaskBySessionId(input.sessionId)) {
+          throw new AppError('session is already linked to a task', { code: 'SESSION_ALREADY_LINKED', statusCode: 409 });
+        }
+      }
       const row = resolveDb.createTask({
         projectPath: input.projectPath,
         title: input.title,
         description: input.description ?? null,
+        status,
         executorProvider: provider,
         executorModel: input.executorModel ?? null,
+        sessionId: input.sessionId ?? null,
       });
       emit({ kind: 'task_upserted', task: row, actor: 'user' });
       return decorate(row);
