@@ -379,6 +379,16 @@ export function createTasksService(
     ): TaskRow | null {
       const row = resolveDb.writeSummary(taskId, input);
       if (row) emit({ kind: 'task_upserted', task: row, actor: 'engine' });
+      // After persisting the verdict, apply the auto-move policy (only_plan→todo,
+      // done→done when enabled, etc.). This is the natural trigger point: the
+      // headless verdict run writes the verdict via the write_task_summary tool,
+      // which routes here, so the board advances the column as part of the same
+      // settle — no separate caller needed. applyVerdict no-ops the move when
+      // auto_move_enabled is off, leaving the column untouched.
+      if (row) {
+        this.applyVerdict(taskId, input.verdict);
+        return decorate(resolveDb.getTask(taskId) ?? row);
+      }
       return row ? decorate(row) : null;
     },
 

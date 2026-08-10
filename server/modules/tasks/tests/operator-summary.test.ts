@@ -76,14 +76,33 @@ function makeDb(rows: TaskRow[]) {
   return db as unknown as TaskDbLike;
 }
 
-test('writeSummary persists verdict and broadcasts upserted', () => {
+test('writeSummary persists verdict, broadcasts, and auto-moves per default config', () => {
   const events: unknown[] = [];
   const rows: TaskRow[] = [makeRow({ task_id: 't1', status: 'in_review' })];
   const svc = createTasksService(makeDb(rows), { broadcast: (e) => events.push(e) });
+  // Default config: auto_move_enabled=true, auto_move_only_plan_to_todo=true.
+  // only_plan + in_review → todo, so writeSummary emits the verdict upsert AND
+  // a second task_upserted for the todo move.
   const out = svc.writeSummary('t1', { summary: 's', verdict: 'only_plan', reason: 'r' });
   assert.equal(out?.verdict, 'only_plan');
+  assert.equal(rows[0].status, 'todo');
+  assert.equal(events.length, 2);
+  for (const e of events) {
+    assert.equal((e as { kind: string }).kind, 'task_upserted');
+  }
+});
+
+test('writeSummary without auto_move leaves the column and emits one event', () => {
+  const events: unknown[] = [];
+  const rows: TaskRow[] = [makeRow({ task_id: 't1', status: 'in_review' })];
+  const svc = createTasksService(makeDb(rows), {
+    broadcast: (e) => events.push(e),
+    getOperatorConfig: () => ({ ...DEFAULT_OPERATOR_CONFIG, auto_move_enabled: false }),
+  });
+  const out = svc.writeSummary('t1', { summary: 's', verdict: 'only_plan', reason: 'r' });
+  assert.equal(out?.verdict, 'only_plan');
+  assert.equal(rows[0].status, 'in_review');
   assert.equal(events.length, 1);
-  assert.equal((events[0] as { kind: string }).kind, 'task_upserted');
 });
 
 test('applyVerdict auto-moves only_plan -> todo when auto_move enabled', () => {

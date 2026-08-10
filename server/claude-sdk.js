@@ -540,6 +540,10 @@ async function queryClaudeSDK(command, options = {}, ws) {
       sdkOptions.cwd = cfg.workspace || sdkOptions.cwd;
       sdkOptions.permissionMode = 'bypassPermissions';
       sdkOptions.allowDangerouslySkipPermissions = true;
+      // Custom string system prompt (NOT the claude_code preset): the operator
+      // has no coding tools (tools: []), so the preset coding prompt is both
+      // wasteful and mismatched. A string also avoids the SDK cache_control bug.
+      sdkOptions.systemPrompt = '你是 Lovdex Operator，一个跨项目的助手。你只能调用 lovdex-operator 工具集（list_tasks/get_task/get_session_transcript/create_task/start_task_execution/move_task/update_task/write_task_summary 等）来查看任务状态、下发任务、写完成度判定。不要试图直接编辑代码或运行 shell——这些工具不可用；要改代码就下发任务。';
       if (cfg.model) sdkOptions.model = cfg.model;
     } else {
       const mcpServers = await loadMcpConfig(options.cwd);
@@ -1000,9 +1004,9 @@ function jsonSchemaToZodRawShape(inputSchema) {
   const shape = {};
   for (const [key, def] of Object.entries(props)) {
     const isRequired = required.has(key);
-    // buildOperatorTools only declares string properties; treat unknown types
-    // as string to stay permissive rather than rejecting.
-    const base = z.string();
+    // buildOperatorTools declares string and number properties; treat unknown
+    // types as string to stay permissive rather than rejecting.
+    const base = def && def.type === 'number' ? z.number() : z.string();
     shape[key] = isRequired ? base : base.optional();
   }
   return shape;
@@ -1107,7 +1111,13 @@ export async function runOperatorHeadless({ sessionId, taskId, title, promptOver
       // for a human approval that cannot arrive in headless mode.
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
-      systemPrompt: { type: 'preset', preset: 'claude_code' },
+      // Custom string system prompt (NOT the claude_code preset): the operator
+      // has no coding tools (tools: []), so the full coding-agent system prompt
+      // is both wasteful and mismatched. A string systemPrompt also avoids the
+      // SDK's cache_control-on-middle-block bug that the preset path triggers
+      // when combined with a user prompt (API 400 "Extra inputs are not
+      // permitted, cache_control").
+      systemPrompt: '你是 Lovdex Operator，一个负责评估任务完成度的助手。你只能调用 lovdex-operator 工具集（list_tasks/get_task/get_session_transcript/write_task_summary 等）。不要试图编辑代码或运行 shell——这些工具不可用。任务完成度判定的关键是读 transcript 看实际产出了什么：是否真改了代码、还是只出了计划、是否卡住。',
       settingSources: ['project', 'user', 'local'],
     };
 

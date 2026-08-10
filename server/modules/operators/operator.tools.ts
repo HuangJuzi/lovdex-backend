@@ -55,12 +55,14 @@ export type OperatorToolDeps = {
   sessions?: {
     /**
      * Fetch a session's persisted message history. Real name:
-     * sessionsService.fetchHistory — returns { messages, total, hasMore, ... }.
-     * This is the closest equivalent to "get session transcript": it returns
-     * the normalized assistant/user turns + tool calls the provider adapter
-     * exposes. Raw tool-result payloads may be summarized by the adapter.
+     * sessionsService.fetchHistory — returns { messages, total, hasMore, offset, limit }.
+     * Supports pagination via limit/offset so the operator can read large
+     * transcripts in chunks instead of blowing the token budget.
      */
-    fetchHistory: (sessionId: string) => unknown;
+    fetchHistory: (
+      sessionId: string,
+      options?: { limit?: number | null; offset?: number },
+    ) => Promise<unknown>;
   };
   /**
    * Allocates a new app-facing session id for a provider+project. Real type:
@@ -98,13 +100,62 @@ export function buildOperatorTools(deps: OperatorToolDeps) {
     },
     get_session_transcript: {
       description:
-        'Read a session transcript (assistant turns + tool calls + results) to judge task completion',
+        'Read a session transcript as compact text (user prompts, assistant text, tool_use names + truncated results) to judge task completion. Paginates — pass limit/offset for large sessions. Returns { total, offset, limit, hasMore, transcript } where transcript is plain text.',
       inputSchema: {
         type: 'object',
-        properties: { sessionId: { type: 'string' } },
+        properties: {
+          sessionId: { type: 'string' },
+          limit: { type: 'number', description: 'max messages per page (default 40)' },
+          offset: { type: 'number', description: 'message offset for pagination (default 0)' },
+        },
         required: ['sessionId'],
       },
-      handler: async (i: { sessionId: string }) => deps.sessions!.fetchHistory(i.sessionId),
+      handler: async (i: { sessionId: string; limit?: number; offset?: number }) => {
+        const limit = typeof i.limit === 'number' && i.limit > 0 ? i.limit : 40;
+        const offset = typeof i.offset === 'number' && i.offset >= 0 ? i.offset : 0;
+        const result = (await deps.sessions!.fetchHistory(i.sessionId, { limit, offset })) as {
+          messages?: unknown[];
+          total?: number;
+          hasMore?: boolean;
+        };
+        const messages = Array.isArray(result?.messages) ? result.messages : [];
+        // Compact each message to plain text so we don't blow the token budget
+        // with raw provider payloads. The operator only needs the gist of what
+        // the agent did, not every byte.
+        const lines: string[] = [];
+        for (const msg of messages) {
+          const m = msg as {
+            role?: string;
+            kind?: string;
+            content?: string;
+            commandName?: string;
+            toolName?: string;
+            toolResult?: string;
+            isLocalCommand?: boolean;
+          };
+          const role = m.role ?? m.kind ?? 'message';
+          if (m.isLocalCommand && m.commandName) {
+            lines.push(`[${role}] /${m.commandName}`);
+            continue;
+          }
+          if (role === 'tool' || m.kind === 'tool') {
+            const res = typeof m.toolResult === 'string' ? m.toolResult : '';
+            lines.push(`[tool ${m.toolName ?? ''}] ${res.slice(0, 300)}`);
+            continue;
+          }
+          const text = (m.content ?? '').trim();
+          if (text) {
+            lines.push(`[${role}] ${text.slice(0, 1200)}`);
+          }
+        }
+        return {
+          total: result?.total ?? messages.length,
+          offset,
+          limit,
+          hasMore: Boolean(result?.hasMore),
+          transcript: lines.join('\n\n') || '(empty transcript)',
+        };
+      },
     },
     create_task: {
       description:
