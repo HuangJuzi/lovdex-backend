@@ -521,9 +521,31 @@ async function queryClaudeSDK(command, options = {}, ws) {
       effortModels,
     });
 
-    const mcpServers = await loadMcpConfig(options.cwd);
-    if (mcpServers) {
-      sdkOptions.mcpServers = mcpServers;
+    // Operator assistant sessions: swap in the CLOSED operator tool set + use
+    // the operator workspace as cwd (never the project path, never the
+    // project's MCP servers). This is the interactive counterpart to
+    // runOperatorHeadless — same safety boundary (no Bash/Edit/Write, only the
+    // lovdex-operator MCP tools), but WITH websocket streaming so the user can
+    // chat. `tools: []` disables all built-in tools; the operator MCP server
+    // supplies list_tasks/create_task/write_task_summary/etc.
+    if (options.isOperator && operatorDepsRef) {
+      const cfg = getOperatorConfig();
+      const operatorServer = createSdkMcpServer({
+        name: 'lovdex-operator',
+        tools: buildOperatorSdkTools(operatorDepsRef),
+        alwaysLoad: true,
+      });
+      sdkOptions.tools = [];
+      sdkOptions.mcpServers = { 'lovdex-operator': operatorServer };
+      sdkOptions.cwd = cfg.workspace || sdkOptions.cwd;
+      sdkOptions.permissionMode = 'bypassPermissions';
+      sdkOptions.allowDangerouslySkipPermissions = true;
+      if (cfg.model) sdkOptions.model = cfg.model;
+    } else {
+      const mcpServers = await loadMcpConfig(options.cwd);
+      if (mcpServers) {
+        sdkOptions.mcpServers = mcpServers;
+      }
     }
 
     // Turns with image attachments switch to streaming input so the images

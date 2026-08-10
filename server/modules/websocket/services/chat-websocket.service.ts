@@ -218,6 +218,10 @@ async function handleChatSend(
     resume: Boolean(session.provider_session_id),
     cwd: clientOptions.cwd ?? session.project_path ?? undefined,
     projectPath: session.project_path ?? clientOptions.projectPath,
+    // Operator assistant sessions run with the closed operator tool set + the
+    // operator workspace as cwd (not the project path). See claude-sdk.js
+    // queryClaudeSDK operator branch.
+    isOperator: Boolean(session.is_operator),
   };
 
   try {
