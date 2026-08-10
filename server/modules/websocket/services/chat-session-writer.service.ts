@@ -44,13 +44,25 @@ type ChatSessionWriterOptions = {
  *   intercepted and recorded as the provider-id mapping as well.
  */
 export class ChatSessionWriter {
-  ws: RealtimeClientConnection;
   userId: string | number | null;
   /**
    * Some runtimes feature-detect their writer with this flag; keep it so the
    * gateway writer is a drop-in replacement for `WebSocketWriter`.
    */
   isWebSocketWriter = true;
+
+  /**
+   * Every subscriber socket this run's live frames are fanned out to.
+   *
+   * This is a Set (not a single socket) on purpose: a page can be open in more
+   * than one tab, and each tab subscribes to the same session. If the writer
+   * only sent to the LAST subscriber, a later `chat.subscribe` from another
+   * tab would silently steal the stream — the original tab would freeze
+   * (no stream_delta) and its input would stay loading until a refresh. With
+   * fan-out, every subscribed tab receives the live stream and no tab can
+   * steal it from another.
+   */
+  private sockets = new Set<RealtimeClientConnection>();
 
   private readonly options: ChatSessionWriterOptions;
   /**
@@ -63,9 +75,11 @@ export class ChatSessionWriter {
 
   constructor(options: ChatSessionWriterOptions) {
     this.options = options;
-    this.ws = options.connection;
     this.userId = options.userId;
     this.providerSessionId = options.providerSessionId;
+    // The socket that sent `chat.send` is the first subscriber. It gets the
+    // stream, and so does every later socket that subscribes to this session.
+    this.addConnection(options.connection);
   }
 
   send(data: unknown): void {
@@ -116,8 +130,40 @@ export class ChatSessionWriter {
     }
   }
 
+  /**
+   * Adds a socket to the run's live fan-out set. Idempotent — re-subscribing
+   * from the same socket (session open, reconnect, keepalive) is a no-op.
+   *
+   * The socket is removed from the set automatically when it closes, so a
+   * torn-down tab (refresh, close) stops receiving frames and cannot hold the
+   * stream hostage. This is what makes mid-stream page refreshes work: the old
+   * tab's socket closes and the new tab's subscribe lands on a clean set.
+   */
+  addConnection(newConnection: RealtimeClientConnection): void {
+    if (!newConnection || this.sockets.has(newConnection)) {
+      return;
+    }
+    this.sockets.add(newConnection);
+    newConnection.on?.('close', () => {
+      this.sockets.delete(newConnection);
+    });
+  }
+
+  /**
+   * Removes a socket from the live fan-out set. Kept for symmetry / explicit
+   * cleanup; the automatic close-listener path covers the normal teardown.
+   */
+  removeConnection(connection: RealtimeClientConnection): void {
+    this.sockets.delete(connection);
+  }
+
+  /**
+   * Backward-compatible alias: the old contract was "re-bind the single ws".
+   * Runtimes and the registry still call this; under fan-out it just adds the
+   * connection as another subscriber instead of replacing the previous one.
+   */
   updateWebSocket(newConnection: RealtimeClientConnection): void {
-    this.ws = newConnection;
+    this.addConnection(newConnection);
   }
 
   setSessionId(sessionId: string): void {
@@ -138,8 +184,19 @@ export class ChatSessionWriter {
   }
 
   private forward(message: NormalizedMessage): void {
-    if (this.ws.readyState === WS_OPEN_STATE) {
-      this.ws.send(JSON.stringify(message));
+    const data = JSON.stringify(message);
+    for (const socket of this.sockets) {
+      if (socket.readyState === WS_OPEN_STATE) {
+        try {
+          socket.send(data);
+        } catch {
+          // A socket that reports OPEN but throws on send is broken — drop it
+          // so it stops blocking the run's fan-out to the healthy subscribers.
+          this.sockets.delete(socket);
+        }
+      } else {
+        this.sockets.delete(socket);
+      }
     }
   }
 }

@@ -452,11 +452,15 @@ export const chatRunRegistry = {
   },
 
   /**
-   * Re-attaches a run's outbound stream to a (new) websocket connection.
+   * Adds a websocket connection to a run's live fan-out set.
    *
-   * This is the generic replacement for the Claude-only writer reconnect:
-   * after a page refresh the new socket subscribes and immediately starts
-   * receiving the still-running stream, for every provider.
+   * Unlike the old single-socket writer, this is ADDITIVE, not a replacement:
+   * every socket that subscribes to this session while it is running receives
+   * the live stream. That is what prevents the multi-tab "connection steal" —
+   * a later `chat.subscribe` from another tab used to re-bind the run to the
+   * last subscriber, freezing the original tab with no self-heal until a
+   * refresh. With fan-out both tabs stream; each tab still catches up via the
+   * `lastSeq`-based replay that follows the ack.
    */
   attachConnection(appSessionId: string, connection: RealtimeClientConnection): boolean {
     const run = runs.get(appSessionId);
@@ -464,7 +468,7 @@ export const chatRunRegistry = {
       return false;
     }
 
-    run.writer.updateWebSocket(connection);
+    run.writer.addConnection(connection);
     return true;
   },
 

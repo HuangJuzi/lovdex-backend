@@ -32,6 +32,13 @@ export type AnyRecord = Record<string, any>;
 export type RealtimeClientConnection = {
   readyState: number;
   send(data: string): void;
+  /**
+   * Optional event-emitter surface (present on the `ws` WebSockets used by the
+   * chat gateway). Lets a `ChatSessionWriter` remove a subscriber from its
+   * fan-out set the moment the socket closes, so a dead tab cannot keep the
+   * run's stream pinned to itself.
+   */
+  on?(event: 'close', listener: (code?: number, reason?: unknown) => void): void;
 };
 
 /**

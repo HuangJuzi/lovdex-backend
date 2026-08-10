@@ -203,6 +203,7 @@ async function handleChatSend(
 
   const clientOptions = (data.options ?? {}) as AnyRecord;
   const command = typeof data.content === 'string' ? data.content : '';
+  dbg(`[chat.send] options keys=${Object.keys(clientOptions).join(',')} includePartial=${clientOptions.includePartialMessages === true ? 'YES' : 'NO'}`);
 
   // The provider runtimes receive the provider-native session id (that is the
   // id their CLI/SDK understands for resume). Brand-new sessions have no

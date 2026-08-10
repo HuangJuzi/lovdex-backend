@@ -50,6 +50,58 @@ test('terminal complete clears the approval marker and evicts its request map', 
   );
 });
 
+test('attachConnection fans out to every subscriber instead of stealing the stream', (t) => {
+  const receivedA: string[] = [];
+  const receivedB: string[] = [];
+  const closeListeners = new Map<'A' | 'B', () => void>();
+  const makeConnection = (label: 'A' | 'B') => ({
+    readyState: 1,
+    send: (data: string) => {
+      if (label === 'A') receivedA.push(data);
+      else receivedB.push(data);
+    },
+    on: (_event: string, listener: () => void) => {
+      closeListeners.set(label, listener);
+    },
+  });
+  const connA = makeConnection('A');
+  const connB = makeConnection('B');
+
+  t.after(() => chatRunRegistry.clearAll());
+
+  const run = chatRunRegistry.startRun({
+    appSessionId: 'app-3',
+    provider: 'claude',
+    providerSessionId: null,
+    connection: connA,
+    userId: null,
+  });
+  assert.ok(run);
+
+  // A second tab subscribes while the run is live — must NOT steal the stream.
+  assert.equal(chatRunRegistry.attachConnection('app-3', connB), true);
+
+  run.writer.send({ kind: 'text', content: 'hello', provider: 'claude', sessionId: 'app-3' });
+  assert.equal(receivedA.length, 1, 'first subscriber still receives the frame');
+  assert.equal(receivedB.length, 1, 'second subscriber also receives the frame');
+  assert.equal(receivedA[0], receivedB[0], 'both subscribers receive the identical frame');
+
+  // Tab B closes (page refresh/close): it must stop receiving without
+  // affecting tab A.
+  const closeB = closeListeners.get('B');
+  assert.ok(closeB, 'addConnection should register a close listener');
+  closeB();
+
+  run.writer.send({ kind: 'text', content: 'world', provider: 'claude', sessionId: 'app-3' });
+  assert.equal(receivedA.length, 2, 'surviving subscriber keeps receiving after B closes');
+  assert.equal(receivedB.length, 1, 'closed subscriber receives no further frames');
+
+  // Re-attaching the same socket is idempotent — no duplicate delivery.
+  chatRunRegistry.attachConnection('app-3', connA);
+  run.writer.send({ kind: 'text', content: 'again', provider: 'claude', sessionId: 'app-3' });
+  assert.equal(receivedA.length, 3, 'idempotent re-attach must not double-deliver');
+});
+
 test('completeRun is a no-op once a run already completed', (t) => {
   const approvals: boolean[] = [];
   setTaskLinkage({
