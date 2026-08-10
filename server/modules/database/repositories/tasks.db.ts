@@ -115,6 +115,7 @@ export const tasksDb = {
     executorProvider?: TaskEngine;
     executorModel?: string | null;
     sessionId?: string | null;
+    projectPath?: string;
   }): TaskRow | null {
     const db = getConnection();
     const sets: string[] = [];
@@ -124,6 +125,7 @@ export const tasksDb = {
     if (updates.executorProvider !== undefined) { sets.push('executor_provider = ?'); params.push(updates.executorProvider); }
     if (updates.executorModel !== undefined) { sets.push('executor_model = ?'); params.push(updates.executorModel); }
     if (updates.sessionId !== undefined) { sets.push('session_id = ?'); params.push(updates.sessionId); }
+    if (updates.projectPath !== undefined) { sets.push('project_path = ?'); params.push(updates.projectPath); }
     sets.push('updated_at = CURRENT_TIMESTAMP');
     params.push(taskId);
     if (sets.length === 1) return tasksDb.getTask(taskId);

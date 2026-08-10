@@ -4,6 +4,7 @@ import test from 'node:test';
 import { projectsDb } from '@/modules/database/index.js';
 import { createTasksService } from '@/modules/tasks/services/tasks.service.js';
 import type { TaskDbLike } from '@/modules/tasks/services/tasks.service.js';
+import { AppError } from '@/shared/utils.js';
 
 type StoredTask = {
   task_id: string;
@@ -56,10 +57,16 @@ function makeDbStub() {
     getTask: (id: string) => tasks.get(id) ?? null,
     getTaskBySessionId: () => null,
     listTasks: () => [...tasks.values()],
-    updateTask: (id: string, updates: object) => {
+    updateTask: (id: string, updates: Record<string, unknown>) => {
       const current = tasks.get(id);
       if (!current) return null;
-      const next = { ...current, ...updates };
+      const next: StoredTask = { ...current };
+      if (updates.title !== undefined) next.title = String(updates.title);
+      if (updates.description !== undefined) next.description = updates.description as string | null;
+      if (updates.executorProvider !== undefined) next.executor_provider = String(updates.executorProvider);
+      if (updates.executorModel !== undefined) next.executor_model = updates.executorModel as string | null;
+      if (updates.sessionId !== undefined) next.session_id = updates.sessionId as string | null;
+      if (updates.projectPath !== undefined) next.project_path = String(updates.projectPath);
       tasks.set(id, next);
       return next;
     },
@@ -81,10 +88,10 @@ function makeDbStub() {
   return { db: db as unknown as TaskDbLike, calls };
 }
 
-function makeProjectStub(projectPath: string | null) {
+function makeProjectStub(...knownPaths: string[]) {
   return {
     getProjectPath: (path: string) =>
-      path === projectPath
+      knownPaths.includes(path)
         ? { project_id: 'p1', project_path: path, custom_project_name: null, isStarred: 0, isArchived: 0 }
         : null,
   } as unknown as typeof projectsDb;
@@ -174,4 +181,133 @@ test('getTaskBySessionId returns the decorated task for a linked session', () =>
   assert.equal(got?.task_id, 't1');
   assert.equal(got?.approval_pending, true);
   assert.equal(svc.getTaskBySessionId('nope'), null);
+});
+
+test('updateTask: backlog/todo task project change deletes the linked session and unlinks', async () => {
+  const { db } = makeDbStub();
+  db.linkSession('t1', 's1');
+  const deleted: string[] = [];
+  const svc = createTasksService(db, {
+    broadcast: () => {},
+    deps: {
+      projectsDb: makeProjectStub('/p', '/q'),
+      deleteSessionHard: async (sid: string) => {
+        deleted.push(sid);
+      },
+    },
+  });
+  const row = await svc.updateTask('t1', { projectPath: '/q' });
+  assert.equal(row?.project_path, '/q');
+  assert.equal(row?.session_id, null);
+  assert.deepEqual(deleted, ['s1']);
+  const stored = db.getTask('t1') as StoredTask;
+  assert.equal(stored.project_path, '/q');
+  assert.equal(stored.session_id, null);
+});
+
+test('updateTask: project change without a session does not delete anything', async () => {
+  const { db } = makeDbStub();
+  const deleted: string[] = [];
+  const svc = createTasksService(db, {
+    broadcast: () => {},
+    deps: {
+      projectsDb: makeProjectStub('/p', '/q'),
+      deleteSessionHard: async (sid: string) => {
+        deleted.push(sid);
+      },
+    },
+  });
+  const row = await svc.updateTask('t1', { projectPath: '/q' });
+  assert.equal(row?.project_path, '/q');
+  assert.deepEqual(deleted, []);
+});
+
+test('updateTask: rejects project change for non-backlog/todo tasks', async () => {
+  for (const status of ['in_progress', 'in_review', 'done']) {
+    const { db } = makeDbStub();
+    db.updateTaskStatus('t1', status);
+    const svc = createTasksService(db, {
+      broadcast: () => {},
+      deps: { projectsDb: makeProjectStub('/p') },
+    });
+    await assert.rejects(
+      () => svc.updateTask('t1', { projectPath: '/q' }),
+      /not backlog or todo/,
+    );
+  }
+});
+
+test('updateTask: rejects an unknown target project without deleting the session', async () => {
+  const { db } = makeDbStub();
+  db.linkSession('t1', 's1');
+  const deleted: string[] = [];
+  const svc = createTasksService(db, {
+    broadcast: () => {},
+    deps: {
+      projectsDb: makeProjectStub('/p'),
+      deleteSessionHard: async (sid: string) => {
+        deleted.push(sid);
+      },
+    },
+  });
+  await assert.rejects(() => svc.updateTask('t1', { projectPath: '/nope' }), /project not found/);
+  assert.deepEqual(deleted, []);
+  assert.equal((db.getTask('t1') as StoredTask).session_id, 's1');
+});
+
+test('updateTask: selecting the current project is a no-op', async () => {
+  const events: unknown[] = [];
+  const { db } = makeDbStub();
+  db.linkSession('t1', 's1');
+  const deleted: string[] = [];
+  const svc = createTasksService(db, {
+    broadcast: (e) => events.push(e),
+    deps: {
+      projectsDb: makeProjectStub('/p'),
+      deleteSessionHard: async (sid: string) => {
+        deleted.push(sid);
+      },
+    },
+  });
+  const row = await svc.updateTask('t1', { projectPath: '/p' });
+  assert.equal(row?.project_path, '/p');
+  assert.deepEqual(deleted, []);
+  assert.equal(events.length, 0);
+  assert.equal((db.getTask('t1') as StoredTask).session_id, 's1');
+});
+
+test('updateTask: tolerates a missing session row when deleting', async () => {
+  const { db } = makeDbStub();
+  db.linkSession('t1', 's1');
+  const svc = createTasksService(db, {
+    broadcast: () => {},
+    deps: {
+      projectsDb: makeProjectStub('/p', '/q'),
+      deleteSessionHard: async () => {
+        const e = new AppError('Session not found', { code: 'SESSION_NOT_FOUND', statusCode: 404 });
+        throw e;
+      },
+    },
+  });
+  const row = await svc.updateTask('t1', { projectPath: '/q' });
+  assert.equal(row?.project_path, '/q');
+});
+
+test('updateTask: ordinary field updates leave the session untouched', async () => {
+  const { db } = makeDbStub();
+  db.linkSession('t1', 's1');
+  const deleted: string[] = [];
+  const svc = createTasksService(db, {
+    broadcast: () => {},
+    deps: {
+      projectsDb: makeProjectStub('/p'),
+      deleteSessionHard: async (sid: string) => {
+        deleted.push(sid);
+      },
+    },
+  });
+  const row = await svc.updateTask('t1', { title: 'new title' });
+  assert.equal(row?.title, 'new title');
+  assert.equal((db.getTask('t1') as StoredTask).session_id, 's1');
+  assert.deepEqual(deleted, []);
 });

@@ -56,7 +56,10 @@ export function createTasksService(
   db: TaskDbLike,
   opts: {
     broadcast: TaskBroadcast;
-    deps?: { projectsDb?: typeof projectsDb };
+    deps?: {
+      projectsDb?: typeof projectsDb;
+      deleteSessionHard?: (sessionId: string) => Promise<void>;
+    };
     /**
      * Returns the app session ids that currently have a pending tool-approval
      * request. Used to decorate task rows with `approval_pending` so the board
@@ -81,6 +84,18 @@ export function createTasksService(
 ) {
   const resolveDb = db;
   const resolveProject = opts.deps?.projectsDb ?? projectsDb;
+
+  /**
+   * Hard-deletes a session row plus its transcript file. Production default is a
+   * lazy import of sessionsService so unit tests (which inject a stub) never pull
+   * in the websocket/chat-run-registry dependency chain.
+   */
+  const deleteSessionHard: (sessionId: string) => Promise<void> =
+    opts.deps?.deleteSessionHard
+    ?? ((sessionId) =>
+        import('@/modules/providers/services/sessions.service.js').then(({ sessionsService }) =>
+          sessionsService.deleteOrArchiveSessionById(sessionId, { force: true, deletedFromDisk: true }),
+        ));
   const pendingApprovalSessions = opts.getPendingApprovalSessions ?? (() => new Set<string>());
   const runningSessions = opts.getRunningSessions;
 
@@ -174,14 +189,49 @@ export function createTasksService(
 
     applyStatusChange,
 
-    updateTask(taskId: string, updates: Parameters<TaskDbLike['updateTask']>[1]): TaskRow | null {
+    async updateTask(taskId: string, updates: Parameters<TaskDbLike['updateTask']>[1]): Promise<TaskRow | null> {
       if (updates.executorProvider !== undefined && !isTaskEngine(updates.executorProvider)) {
         throw new AppError(`invalid executor_provider: ${String(updates.executorProvider)}`, {
           code: 'INVALID_EXECUTOR',
           statusCode: 400,
         });
       }
-      const row = resolveDb.updateTask(taskId, updates);
+      const current = resolveDb.getTask(taskId);
+      if (!current) return null;
+
+      const { projectPath, ...rest } = updates;
+      const wantsProjectChange = projectPath !== undefined && projectPath !== current.project_path;
+
+      // Picking the task's current project (with no other changes) is a no-op:
+      // no write, no event, no session deletion.
+      if (projectPath !== undefined && !wantsProjectChange && Object.keys(rest).length === 0) {
+        return decorate(current);
+      }
+
+      let effective: Parameters<TaskDbLike['updateTask']>[1] = rest;
+      if (wantsProjectChange) {
+        if (current.status !== 'backlog' && current.status !== 'todo') {
+          throw new AppError('cannot change project for a task that is not backlog or todo', {
+            code: 'PROJECT_CHANGE_NOT_ALLOWED',
+            statusCode: 400,
+          });
+        }
+        if (!resolveProject.getProjectPath(projectPath)) {
+          throw new AppError(`project not found: ${projectPath}`, { code: 'PROJECT_NOT_FOUND', statusCode: 404 });
+        }
+        if (current.session_id) {
+          try {
+            await deleteSessionHard(current.session_id);
+          } catch (err) {
+            // A session row that is already gone shouldn't block the project
+            // change — the outcome (unlink from a dead session) is the same.
+            if ((err as AppError)?.code !== 'SESSION_NOT_FOUND') throw err;
+          }
+        }
+        effective = { ...rest, projectPath, sessionId: null };
+      }
+
+      const row = resolveDb.updateTask(taskId, effective);
       if (row) emit({ kind: 'task_upserted', task: row, actor: 'user' });
       return row ? decorate(row) : null;
     },
