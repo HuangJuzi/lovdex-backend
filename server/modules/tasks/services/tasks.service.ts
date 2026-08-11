@@ -1,10 +1,27 @@
+import os from 'node:os';
+import path from 'node:path';
+
 import { projectsDb, sessionsDb } from '@/modules/database/index.js';
 import { isTaskEngine, isTaskStatus, TASK_STATUSES, tasksDb } from '@/modules/database/repositories/tasks.db.js';
+import { getOperatorConfig } from '@/modules/operators/operator.config.js';
+import {
+  isTaskDeadline,
+  isTaskLabel,
+  isTaskPriority,
+  type TaskLabel,
+  type TaskPriority,
+} from '@/shared/task-status.js';
 import { AppError, normalizeProjectPath } from '@/shared/utils.js';
 import type { AiVerdict, SubStatus } from '@/shared/task-status.js';
 import type { TaskEngine, TaskRow, TaskStatus } from '@/shared/types.js';
 
 export const STATUS_ORDER: readonly TaskStatus[] = TASK_STATUSES;
+
+function expandHome(inputPath: string): string {
+  if (inputPath === '~') return os.homedir();
+  if (inputPath.startsWith('~/') || inputPath.startsWith('~\\')) return path.join(os.homedir(), inputPath.slice(2));
+  return inputPath;
+}
 
 export type TaskEvent =
   | {
@@ -41,6 +58,11 @@ type CreateTaskInput = {
   executorProvider?: TaskEngine;
   executorModel?: string | null;
   sessionId?: string | null;
+  priority?: TaskPriority;
+  deadline?: string | null;
+  isOperator?: boolean;
+  label?: TaskLabel;
+  remark?: string | null;
 };
 
 /**
@@ -183,9 +205,32 @@ export function createTasksService(
       if (!isTaskEngine(provider)) {
         throw new AppError(`invalid executor_provider: ${String(provider)}`, { code: 'INVALID_EXECUTOR', statusCode: 400 });
       }
-      const project = resolveProject.getProjectPath(input.projectPath);
-      if (!project) {
-        throw new AppError(`project not found: ${input.projectPath}`, { code: 'PROJECT_NOT_FOUND', statusCode: 404 });
+      if (input.priority !== undefined && !isTaskPriority(input.priority)) {
+        throw new AppError(`invalid priority: ${String(input.priority)}`, { code: 'INVALID_PRIORITY', statusCode: 400 });
+      }
+      if (input.deadline !== undefined && input.deadline !== null && !isTaskDeadline(input.deadline)) {
+        throw new AppError(`invalid deadline: ${String(input.deadline)}`, { code: 'INVALID_DEADLINE', statusCode: 400 });
+      }
+      if (input.label !== undefined && !isTaskLabel(input.label)) {
+        throw new AppError(`invalid label: ${String(input.label)}`, { code: 'INVALID_LABEL', statusCode: 400 });
+      }
+      const isOperator = input.isOperator === true;
+      let projectPath = input.projectPath;
+      if (isOperator) {
+        if (provider !== 'claude') {
+          throw new AppError('operator tasks must use the claude executor', { code: 'INVALID_EXECUTOR', statusCode: 400 });
+        }
+        const workspace = expandHome(getOperatorConfig().workspace);
+        resolveProject.createProjectPath(workspace);
+        if (!resolveProject.getProjectPath(workspace)) {
+          throw new AppError(`operator workspace not found: ${workspace}`, { code: 'PROJECT_NOT_FOUND', statusCode: 404 });
+        }
+        projectPath = workspace;
+      } else {
+        const project = resolveProject.getProjectPath(input.projectPath);
+        if (!project) {
+          throw new AppError(`project not found: ${input.projectPath}`, { code: 'PROJECT_NOT_FOUND', statusCode: 404 });
+        }
       }
       if (input.sessionId != null) {
         const session = resolveSession(input.sessionId);
@@ -200,13 +245,18 @@ export function createTasksService(
         }
       }
       const row = resolveDb.createTask({
-        projectPath: input.projectPath,
+        projectPath,
         title: input.title,
         description: input.description ?? null,
         status,
         executorProvider: provider,
         executorModel: input.executorModel ?? null,
         sessionId: input.sessionId ?? null,
+        priority: input.priority ?? 'P2',
+        deadline: input.deadline ?? null,
+        isOperator,
+        label: input.label ?? 'other',
+        remark: input.remark ?? null,
       });
       emit({ kind: 'task_upserted', task: row, actor: 'user' });
       return decorate(row);
@@ -252,6 +302,9 @@ export function createTasksService(
 
       let effective: Parameters<TaskDbLike['updateTask']>[1] = rest;
       if (wantsProjectChange) {
+        if (current.is_operator) {
+          throw new AppError('cannot change project for an operator task', { code: 'PROJECT_CHANGE_NOT_ALLOWED', statusCode: 400 });
+        }
         if (current.status !== 'todo') {
           throw new AppError('cannot change project for a task that is not todo', {
             code: 'PROJECT_CHANGE_NOT_ALLOWED',
@@ -301,11 +354,11 @@ export function createTasksService(
 
     startExecution(
       taskId: string,
-      createSession: (provider: TaskEngine, projectPath: string) => string,
+      createSession: (provider: TaskEngine, projectPath: string, isOperator?: boolean) => string,
     ): { sessionId: string } | null {
       const row = resolveDb.getTask(taskId);
       if (!row) return null;
-      const sessionId = createSession(row.executor_provider, row.project_path);
+      const sessionId = createSession(row.executor_provider, row.project_path, Boolean(row.is_operator));
       resolveDb.linkSession(taskId, sessionId);
       const updated = resolveDb.getTask(taskId) ?? row;
       emit({ kind: 'task_upserted', task: updated, actor: 'user' });

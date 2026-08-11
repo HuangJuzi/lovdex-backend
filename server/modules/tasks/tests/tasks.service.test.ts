@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import os from 'node:os';
 import test from 'node:test';
 
 import { projectsDb } from '@/modules/database/index.js';
@@ -399,4 +400,61 @@ test('createTask with a sessionId rejects a session already linked to a task', (
     () => svc.createTask({ title: 'x', projectPath: '/p', executorProvider: 'claude', sessionId: 's1' }),
     /already linked/,
   );
+});
+
+test('createTask rejects invalid priority / deadline / label', () => {
+  const svc = createTasksService(makeDbStub().db, { broadcast: () => {} });
+  assert.throws(() => svc.createTask({ projectPath: '/p', title: 't', priority: 'P9' as any }), /invalid priority/);
+  assert.throws(() => svc.createTask({ projectPath: '/p', title: 't', deadline: '2026/13/99' }), /invalid deadline/);
+  assert.throws(() => svc.createTask({ projectPath: '/p', title: 't', label: 'nope' as any }), /invalid label/);
+});
+
+test('createTask operator task uses claude + workspace project', () => {
+  const created: any[] = [];
+  const stubDb = {
+    ...makeDbStub().db,
+    createTask: (input: any) => {
+      created.push(input);
+      return {
+        task_id: 't1',
+        priority: input.priority ?? 'P2',
+        deadline: input.deadline ?? null,
+        is_operator: input.isOperator ? 1 : 0,
+        label: input.label ?? 'other',
+        remark: input.remark ?? null,
+        status: 'todo',
+        project_path: input.projectPath,
+      };
+    },
+  };
+  const projectRows = new Map<string, object>();
+  const stubProjects = {
+    getProjectPath: (p: string) => projectRows.get(p) ?? null,
+    createProjectPath: (p: string) => {
+      projectRows.set(p, { project_path: p });
+      return { outcome: 'created', project: { project_path: p } };
+    },
+  };
+  const svc = createTasksService(stubDb as any, {
+    broadcast: () => {},
+    deps: { projectsDb: stubProjects as any },
+  });
+  const row = svc.createTask({ projectPath: '__assistant__', title: 't', isOperator: true });
+  assert.equal(row.is_operator, 1);
+  assert.equal(created[0].projectPath, `${os.homedir()}/.lovdex/operator-workspace`);
+  assert.equal(created[0].executorProvider, 'claude');
+});
+
+test('startExecution passes isOperator to createSession', () => {
+  const captured: any[] = [];
+  const stubDb = {
+    ...makeDbStub().db,
+    getTask: () => ({ task_id: 't1', is_operator: 1, executor_provider: 'claude', project_path: '/w' }),
+  };
+  const svc = createTasksService(stubDb as any, { broadcast: () => {} });
+  svc.startExecution('t1', (_p, _pp, isOp) => {
+    captured.push(isOp);
+    return 's1';
+  });
+  assert.equal(captured[0], true);
 });
