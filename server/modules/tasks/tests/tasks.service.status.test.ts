@@ -117,3 +117,21 @@ test('reconcileFailedTasks marks orphaned in_progress tasks failed', async () =>
     assert.equal(tasksDb.getTask(id)?.sub_status, 'failed');
   });
 });
+
+test('reconcileFailedTasks broadcasts the refreshed sub_status, not the stale row', async () => {
+  await withIsolatedDatabase(() => {
+    const id = seedTask();
+    const events: unknown[] = [];
+    const svc = makeService(events);
+    svc.onSessionStatus('s1', 'running');
+    svc.reconcileFailedTasks(() => new Set());
+    const matching = events.filter(
+      (e) => (e as { kind: string; task?: { task_id?: string } }).kind === 'task_upserted'
+        && (e as { task?: { task_id?: string } }).task?.task_id === id,
+    );
+    // The reconcile emit is the last one (after the earlier running-transition emit).
+    const event = matching[matching.length - 1] as { task: { sub_status?: string } };
+    assert.ok(event, 'expected a task_upserted broadcast for the reconciled task');
+    assert.equal(event.task.sub_status, 'failed');
+  });
+});

@@ -398,7 +398,11 @@ export function createTasksService(
       for (const row of resolveDb.listTasks({})) {
         if (row.status === 'in_progress' && row.session_id && !running.has(row.session_id)) {
           resolveDb.updateTaskSubStatus(row.task_id, 'failed');
-          emit({ kind: 'task_upserted', task: row, actor: 'engine' });
+          // Re-read after the write so the broadcast carries the persisted
+          // sub_status (decorate would otherwise render the stale pre-update row
+          // as "running" on a board connected during startup reconcile).
+          const updated = resolveDb.getTask(row.task_id) ?? row;
+          emit({ kind: 'task_upserted', task: updated, actor: 'engine' });
           changed += 1;
         }
       }
