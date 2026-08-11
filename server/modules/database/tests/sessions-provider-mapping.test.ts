@@ -106,3 +106,16 @@ test('legacy provider-keyed rows stay resolvable through both lookups', async ()
     assert.equal(sessionsDb.getSessionByProviderSessionId('legacy-1')?.session_id, 'legacy-1');
   });
 });
+
+test('getNonOperatorSessionsByProjectPath returns only is_operator=0 rows for the path', async () => {
+  await withIsolatedDatabase(() => {
+    const workspace = '/workspace/op';
+    sessionsDb.createAppSession('op-1', 'claude', workspace, false);
+    sessionsDb.createAppSession('op-2', 'claude', workspace, true);
+    sessionsDb.createAppSession('other-1', 'claude', '/workspace/other', false);
+
+    const rows = sessionsDb.getNonOperatorSessionsByProjectPath(workspace);
+    const ids = rows.map((r) => r.session_id).sort();
+    assert.deepEqual(ids, ['op-1']);
+  });
+});

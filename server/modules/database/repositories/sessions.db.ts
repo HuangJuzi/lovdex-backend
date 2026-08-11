@@ -398,6 +398,25 @@ export const sessionsDb = {
     return normalizeSessionRows(rows);
   },
 
+  /**
+   * 指定路径下非 operator（is_operator = 0）的会话。用于清理 operator
+   * 工作区里在 is_operator 列迁移前遗留的普通会话。
+   */
+  getNonOperatorSessionsByProjectPath(projectPath: string): SessionRow[] {
+    const db = getConnection();
+    const normalizedProjectPath = normalizeProjectPath(projectPath);
+    const rows = db
+      .prepare(
+        `SELECT ${SESSION_ROW_COLUMNS}
+         FROM sessions
+         WHERE project_path = ?
+           AND is_operator = 0`
+      )
+      .all(normalizedProjectPath) as SessionRow[];
+
+    return normalizeSessionRows(rows);
+  },
+
   getSessionsByProjectPathPage(projectPath: string, limit: number, offset: number): SessionRow[] {
     const db = getConnection();
     const normalizedProjectPath = normalizeProjectPath(projectPath);
