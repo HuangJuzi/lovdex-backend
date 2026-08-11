@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
 import { projectsDb } from '@/modules/database/index.js';
+import { getOperatorConfig } from '@/modules/operators/operator.config.js';
 import { createTasksService } from '@/modules/tasks/services/tasks.service.js';
 import type { TaskDbLike } from '@/modules/tasks/services/tasks.service.js';
 import { AppError } from '@/shared/utils.js';
@@ -441,8 +443,35 @@ test('createTask operator task uses claude + workspace project', () => {
   });
   const row = svc.createTask({ projectPath: '__assistant__', title: 't', isOperator: true });
   assert.equal(row.is_operator, 1);
-  assert.equal(created[0].projectPath, `${os.homedir()}/.lovdex/operator-workspace`);
+  // Hermetic: compare against the same source the service uses (getOperatorConfig),
+  // expanding a possible `~` prefix exactly like the service's expandHome helper.
+  const rawWs = getOperatorConfig().workspace;
+  const expectedWs = rawWs === '~' ? os.homedir()
+    : rawWs.startsWith('~/') || rawWs.startsWith('~\\') ? path.join(os.homedir(), rawWs.slice(2))
+    : rawWs;
+  assert.equal(created[0].projectPath, expectedWs);
   assert.equal(created[0].executorProvider, 'claude');
+});
+
+test('createTask operator task requires the claude executor', () => {
+  const svc = createTasksService(makeDbStub().db, {
+    broadcast: () => {},
+    deps: { projectsDb: makeProjectStub() },
+  });
+  assert.throws(
+    () => svc.createTask({ projectPath: '__assistant__', title: 't', isOperator: true, executorProvider: 'codex' }),
+    /must use the claude executor/,
+  );
+});
+
+test('updateTask: rejects project change for an operator task', async () => {
+  const { db } = makeDbStub();
+  (db.getTask('t1') as unknown as { is_operator: number }).is_operator = 1;
+  const svc = createTasksService(db, {
+    broadcast: () => {},
+    deps: { projectsDb: makeProjectStub('/p', '/q') },
+  });
+  await assert.rejects(() => svc.updateTask('t1', { projectPath: '/q' }), /cannot change project/);
 });
 
 test('startExecution passes isOperator to createSession', () => {

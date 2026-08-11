@@ -8,11 +8,12 @@ import {
   isTaskDeadline,
   isTaskLabel,
   isTaskPriority,
+  type AiVerdict,
+  type SubStatus,
   type TaskLabel,
   type TaskPriority,
 } from '@/shared/task-status.js';
 import { AppError, normalizeProjectPath } from '@/shared/utils.js';
-import type { AiVerdict, SubStatus } from '@/shared/task-status.js';
 import type { TaskEngine, TaskRow, TaskStatus } from '@/shared/types.js';
 
 export const STATUS_ORDER: readonly TaskStatus[] = TASK_STATUSES;
@@ -287,6 +288,15 @@ export function createTasksService(
           code: 'INVALID_EXECUTOR',
           statusCode: 400,
         });
+      }
+      if (updates.priority !== undefined && !isTaskPriority(updates.priority)) {
+        throw new AppError(`invalid priority: ${String(updates.priority)}`, { code: 'INVALID_PRIORITY', statusCode: 400 });
+      }
+      if (updates.deadline !== undefined && updates.deadline !== null && !isTaskDeadline(updates.deadline)) {
+        throw new AppError(`invalid deadline: ${String(updates.deadline)}`, { code: 'INVALID_DEADLINE', statusCode: 400 });
+      }
+      if (updates.label !== undefined && !isTaskLabel(updates.label)) {
+        throw new AppError(`invalid label: ${String(updates.label)}`, { code: 'INVALID_LABEL', statusCode: 400 });
       }
       const current = resolveDb.getTask(taskId);
       if (!current) return null;
