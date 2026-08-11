@@ -6,9 +6,10 @@ import {
   isAiVerdict, isPersistedSubStatus, isSubStatus, isTaskStatus,
 } from '@/shared/task-status.js';
 
-test('status list is the legacy 5 (P1)', () => {
-  assert.deepEqual([...STATUS_ORDER], ['backlog', 'todo', 'in_progress', 'in_review', 'done']);
-  assert.equal(isTaskStatus('in_review'), true);
+test('status list is the unified 4', () => {
+  assert.deepEqual([...STATUS_ORDER], ['todo', 'in_progress', 'in_review', 'done']);
+  assert.equal(isTaskStatus('todo'), true);
+  assert.equal(isTaskStatus('backlog'), false);
   assert.equal(isTaskStatus('blocked'), false);
 });
 
