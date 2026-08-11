@@ -41,12 +41,15 @@ const KEY = 'operator_config';
 
 /** Returns the current operator config, merged over safe defaults. */
 export function getOperatorConfig(): OperatorConfig {
+  const workspace =
+    process.env.LOVDEX_OPERATOR_WORKSPACE?.trim() || DEFAULT_OPERATOR_CONFIG.workspace;
+  const base: OperatorConfig = { ...DEFAULT_OPERATOR_CONFIG, workspace };
   const raw = appConfigDb.get(KEY);
-  if (!raw) return DEFAULT_OPERATOR_CONFIG;
+  if (!raw) return base;
   try {
-    return { ...DEFAULT_OPERATOR_CONFIG, ...JSON.parse(raw) };
+    return { ...base, ...JSON.parse(raw) };
   } catch {
-    return DEFAULT_OPERATOR_CONFIG;
+    return base;
   }
 }
 
