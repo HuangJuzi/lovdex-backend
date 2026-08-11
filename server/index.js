@@ -217,7 +217,7 @@ initOperatorHeadless({
 });
 
 app.use('/api/tasks', authenticateToken, buildTasksRouter(tasksService, {
-    createSession: (provider, projectPath) => sessionsDb.createAppSession(crypto.randomUUID(), provider, projectPath),
+    createSession: (provider, projectPath, isOperator) => sessionsDb.createAppSession(crypto.randomUUID(), provider, projectPath, isOperator),
 }));
 
 // Operator settings API (protected) — read/update operator automation config.
