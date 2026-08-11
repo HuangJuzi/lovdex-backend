@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { getConnection } from '@/modules/database/connection.js';
-import { isAiVerdict, type TaskStatus, type AiVerdict, type PersistedSubStatus } from '@/shared/task-status.js';
+import { isAiVerdict, type TaskStatus, type AiVerdict, type PersistedSubStatus, type TaskLabel, type TaskPriority } from '@/shared/task-status.js';
 import type { TaskEngine, TaskRow } from '@/shared/types.js';
 
 export { TASK_STATUSES, isTaskStatus } from '@/shared/task-status.js';
@@ -73,6 +73,11 @@ export const tasksDb = {
     executorModel?: string | null;
     status?: TaskStatus;
     sessionId?: string | null;
+    priority?: TaskPriority;
+    deadline?: string | null;
+    isOperator?: boolean;
+    label?: TaskLabel;
+    remark?: string | null;
   }): TaskRow {
     const db = getConnection();
     const taskId = randomUUID();
@@ -82,8 +87,8 @@ export const tasksDb = {
     const startedAtSet = status === 'in_progress' ? 'CURRENT_TIMESTAMP' : 'NULL';
     const completedAtSet = status === 'done' ? 'CURRENT_TIMESTAMP' : 'NULL';
     const row = db.prepare(`
-      INSERT INTO tasks (task_id, project_path, title, description, status, executor_provider, executor_model, position, session_id, started_at, completed_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ${startedAtSet}, ${completedAtSet})
+      INSERT INTO tasks (task_id, project_path, title, description, status, executor_provider, executor_model, position, session_id, started_at, completed_at, priority, deadline, is_operator, label, remark)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ${startedAtSet}, ${completedAtSet}, ?, ?, ?, ?, ?)
       RETURNING *
     `).get(
       taskId,
@@ -95,6 +100,11 @@ export const tasksDb = {
       input.executorModel ?? null,
       position,
       input.sessionId ?? null,
+      input.priority ?? 'P2',
+      input.deadline ?? null,
+      input.isOperator ? 1 : 0,
+      input.label ?? 'other',
+      input.remark ?? null,
     ) as TaskRow;
     return normalizeTaskRow(row);
   },
@@ -134,6 +144,10 @@ export const tasksDb = {
     executorModel?: string | null;
     sessionId?: string | null;
     projectPath?: string;
+    priority?: TaskPriority;
+    deadline?: string | null;
+    label?: TaskLabel;
+    remark?: string | null;
   }): TaskRow | null {
     const db = getConnection();
     const sets: string[] = [];
@@ -144,6 +158,10 @@ export const tasksDb = {
     if (updates.executorModel !== undefined) { sets.push('executor_model = ?'); params.push(updates.executorModel); }
     if (updates.sessionId !== undefined) { sets.push('session_id = ?'); params.push(updates.sessionId); }
     if (updates.projectPath !== undefined) { sets.push('project_path = ?'); params.push(updates.projectPath); }
+    if (updates.priority !== undefined) { sets.push('priority = ?'); params.push(updates.priority); }
+    if (updates.deadline !== undefined) { sets.push('deadline = ?'); params.push(updates.deadline); }
+    if (updates.label !== undefined) { sets.push('label = ?'); params.push(updates.label); }
+    if (updates.remark !== undefined) { sets.push('remark = ?'); params.push(updates.remark); }
     sets.push('updated_at = CURRENT_TIMESTAMP');
     params.push(taskId);
     if (sets.length === 1) return tasksDb.getTask(taskId);

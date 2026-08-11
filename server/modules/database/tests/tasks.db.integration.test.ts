@@ -192,3 +192,38 @@ test('tasks status CHECK reflects the canonical status list', async () => {
     }
   });
 });
+
+test('createTask persists new fields with defaults', async () => {
+  await withIsolatedDatabase(() => {
+    projectsDb.createProjectPath('/p');
+    const base = { projectPath: '/p', title: 't', executorProvider: 'claude' as const };
+    const row = tasksDb.createTask({ ...base });
+    assert.equal(row.priority, 'P2');
+    assert.equal(row.deadline, null);
+    assert.equal(row.is_operator, 0);
+    assert.equal(row.label, 'other');
+    assert.equal(row.remark, null);
+
+    const op = tasksDb.createTask({ ...base, title: 'op', priority: 'P0', deadline: '2026-12-31', isOperator: true, label: 'bug', remark: '来自需求单 #123' });
+    assert.equal(op.priority, 'P0');
+    assert.equal(op.deadline, '2026-12-31');
+    assert.equal(op.is_operator, 1);
+    assert.equal(op.label, 'bug');
+    assert.equal(op.remark, '来自需求单 #123');
+  });
+});
+
+test('updateTask can set priority/deadline/label/remark', async () => {
+  await withIsolatedDatabase(() => {
+    projectsDb.createProjectPath('/p');
+    const row = tasksDb.createTask({ projectPath: '/p', title: 't', executorProvider: 'claude' as const });
+    const updated = tasksDb.updateTask(row.task_id, { priority: 'P1', deadline: '2026-11-30', label: 'feature', remark: '备注' });
+    assert.equal(updated?.priority, 'P1');
+    assert.equal(updated?.deadline, '2026-11-30');
+    assert.equal(updated?.label, 'feature');
+    assert.equal(updated?.remark, '备注');
+    const cleared = tasksDb.updateTask(row.task_id, { deadline: null, remark: null });
+    assert.equal(cleared?.deadline, null);
+    assert.equal(cleared?.remark, null);
+  });
+});

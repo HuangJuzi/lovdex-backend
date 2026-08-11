@@ -1,6 +1,6 @@
 import type { IncomingMessage } from 'node:http';
 
-import type { SubStatus, TaskStatus } from '@/shared/task-status.js';
+import type { SubStatus, TaskLabel, TaskPriority, TaskStatus } from '@/shared/task-status.js';
 
 //----------------- HTTP RESPONSE SHAPES ------------
 /**
@@ -680,6 +680,11 @@ export type TaskRow = {
   ai_summary: string | null;
   verdict_reason: string | null;
   verdict_at: string | null;
+  priority: TaskPriority;
+  deadline: string | null;
+  is_operator: number; // 0 | 1 — 1 = Lovdex 助手任务
+  label: TaskLabel;
+  remark: string | null;
   /**
    * Realtime-only flag (never persisted): true when the linked session currently
    * has a pending tool-approval request. Decorated by the tasks service from the
