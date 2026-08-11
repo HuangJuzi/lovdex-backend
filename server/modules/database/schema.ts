@@ -131,7 +131,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     project_path      TEXT NOT NULL REFERENCES projects(project_path) ON DELETE CASCADE ON UPDATE CASCADE,
     title             TEXT NOT NULL,
     description       TEXT,
-    status            TEXT NOT NULL DEFAULT 'backlog'
+    status            TEXT NOT NULL DEFAULT 'todo'
                       ${STATUS_CHECK},
     executor_provider TEXT NOT NULL DEFAULT 'claude' CHECK (executor_provider IN ('claude','codex')),
     executor_model    TEXT,
@@ -142,7 +142,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
     ai_summary       TEXT,
-    verdict          TEXT CHECK (verdict IS NULL OR verdict IN ('done','only_plan','needs_review','blocked')),
+    sub_status       TEXT CHECK (sub_status IS NULL OR sub_status IN ('failed','done','only_plan','needs_review','blocked')),
     verdict_reason   TEXT,
     verdict_at       DATETIME
 );

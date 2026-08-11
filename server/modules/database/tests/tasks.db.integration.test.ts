@@ -42,7 +42,7 @@ test('tasksDb CRUD + status validation + session link', async () => {
       executorProvider: 'claude',
       executorModel: 'Sonnet 4.6',
     });
-    assert.equal(created.status, 'backlog');
+    assert.equal(created.status, 'todo');
     assert.equal(created.executor_provider, 'claude');
     // SQLite timestamps are normalized to ISO (with a T) so clients never
     // parse them as local time.
@@ -68,8 +68,9 @@ test('tasksDb.listTasks filters by project and status', async () => {
     projectsDb.createProjectPath('/tmp/a');
     projectsDb.createProjectPath('/tmp/b');
     const t1 = tasksDb.createTask({ projectPath: '/tmp/a', title: 't1', executorProvider: 'claude' });
-    tasksDb.createTask({ projectPath: '/tmp/b', title: 't2', executorProvider: 'codex' });
-    tasksDb.updateTaskStatus(t1.task_id, 'todo');
+    const t2 = tasksDb.createTask({ projectPath: '/tmp/b', title: 't2', executorProvider: 'codex' });
+    tasksDb.updateTaskStatus(t1.task_id, 'in_progress');
+    tasksDb.updateTaskStatus(t2.task_id, 'todo');
 
     assert.equal(tasksDb.listTasks({ projectPath: '/tmp/a' }).length, 1);
     assert.equal(tasksDb.listTasks({ status: 'todo' }).length, 1);
@@ -83,12 +84,12 @@ test('tasksDb.moveTask reorders within a column without collisions', async () =>
     const a = tasksDb.createTask({ projectPath: '/tmp/m', title: 'A', executorProvider: 'claude' });
     const b = tasksDb.createTask({ projectPath: '/tmp/m', title: 'B', executorProvider: 'claude' });
     const c = tasksDb.createTask({ projectPath: '/tmp/m', title: 'C', executorProvider: 'claude' });
-    // positions now 1,2,3 in backlog (distinct)
+    // positions now 1,2,3 in todo (distinct)
 
     // Move C to top (single anchor: before A)
-    tasksDb.moveTask(c.task_id, 'backlog', a.task_id, null);
+    tasksDb.moveTask(c.task_id, 'todo', a.task_id, null);
     // Move B between C and A (both anchors → interpolation)
-    tasksDb.moveTask(b.task_id, 'backlog', c.task_id, a.task_id);
+    tasksDb.moveTask(b.task_id, 'todo', c.task_id, a.task_id);
 
     // No two tasks share a position
     const positions = tasksDb.listTasks({}).map(t => t.position);
@@ -174,11 +175,11 @@ test('tasksDb.createTask honors status + sessionId + lifecycle timestamps', asyn
     assert.equal(done.session_id, 'sess-done');
     assert.ok(done.completed_at, 'completed_at set for done');
 
-    const backlog = tasksDb.createTask({ projectPath: '/tmp/conv', title: 'b', executorProvider: 'claude' });
-    assert.equal(backlog.status, 'backlog');
-    assert.equal(backlog.session_id, null);
-    assert.equal(backlog.started_at, null);
-    assert.equal(backlog.completed_at, null);
+    const todo = tasksDb.createTask({ projectPath: '/tmp/conv', title: 'b', executorProvider: 'claude' });
+    assert.equal(todo.status, 'todo');
+    assert.equal(todo.session_id, null);
+    assert.equal(todo.started_at, null);
+    assert.equal(todo.completed_at, null);
   });
 });
 

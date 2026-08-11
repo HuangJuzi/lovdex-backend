@@ -76,7 +76,7 @@ export const tasksDb = {
   }): TaskRow {
     const db = getConnection();
     const taskId = randomUUID();
-    const status = input.status ?? 'backlog';
+    const status = input.status ?? 'todo';
     const position = (db.prepare('SELECT COALESCE(MAX(position), 0) + 1 AS p FROM tasks WHERE status = ?').get(status) as { p: number }).p;
     // SQLite literals: only write lifecycle timestamps when entering that status (safe, not user input).
     const startedAtSet = status === 'in_progress' ? 'CURRENT_TIMESTAMP' : 'NULL';

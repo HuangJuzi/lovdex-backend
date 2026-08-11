@@ -438,6 +438,37 @@ const migrateTasksTable = (db: Database): void => {
   addColumnToTableIfNotExists(db, 'tasks', taskColumnNames, 'verdict', "TEXT CHECK (verdict IS NULL OR verdict IN ('done','only_plan','needs_review','blocked'))");
   addColumnToTableIfNotExists(db, 'tasks', taskColumnNames, 'verdict_reason', 'TEXT');
   addColumnToTableIfNotExists(db, 'tasks', taskColumnNames, 'verdict_at', 'DATETIME');
+
+  const tasksTableSql = (db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'").get() as { sql?: string } | undefined)?.sql ?? '';
+  if (!tasksTableSql.includes('sub_status')) {
+    console.log('Running migration: rebuild tasks table for two-layer status');
+    try {
+      db.exec('BEGIN');
+      // tasks 是叶子表（无表 REFERENCES tasks），无需 PRAGMA foreign_keys 开关。
+      db.exec('ALTER TABLE tasks RENAME TO tasks_legacy;');
+      db.exec(TASKS_TABLE_SCHEMA_SQL);
+      db.exec(`
+        INSERT INTO tasks (task_id, project_path, title, description, status, executor_provider, executor_model, position, session_id, started_at, completed_at, created_at, updated_at, ai_summary, sub_status, verdict_reason, verdict_at)
+        SELECT task_id, project_path, title, description,
+               CASE
+                 WHEN status = 'backlog' THEN 'todo'
+                 WHEN status = 'in_review' AND verdict IN ('only_plan','needs_review','blocked') THEN 'in_progress'
+                 ELSE status
+               END,
+               executor_provider, executor_model, position, session_id, started_at, completed_at, created_at, updated_at, ai_summary,
+               verdict,
+               verdict_reason, verdict_at
+        FROM tasks_legacy;
+      `);
+      db.exec('DROP TABLE tasks_legacy;');
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_project_status ON tasks(project_path, status);`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_id);`);
+      db.exec('COMMIT');
+    } catch (err) {
+      db.exec('ROLLBACK');
+      throw err;
+    }
+  }
 };
 
 export const runMigrations = (db: Database) => {
