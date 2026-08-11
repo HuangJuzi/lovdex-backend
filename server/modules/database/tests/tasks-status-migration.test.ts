@@ -139,7 +139,7 @@ test('migrateTasksTable adds priority/deadline/is_operator/label/remark', async 
 
   try {
     const db = getConnection();
-    const cols = db.prepare('PRAGMA table_info(tasks)').all().map((c: { name: string }) => c.name);
+    const cols = (db.prepare('PRAGMA table_info(tasks)').all() as { name: string }[]).map((c) => c.name);
     for (const col of ['priority', 'deadline', 'is_operator', 'label', 'remark']) {
       assert.ok(cols.includes(col), `missing column ${col}`);
     }
@@ -183,7 +183,7 @@ test('migrateTasksTable adds columns in-place on sub_status-present table (no re
     const db = getConnection();
 
     // All five columns present (added in place via ALTER TABLE ADD COLUMN)
-    const cols = db.prepare('PRAGMA table_info(tasks)').all().map((c: { name: string }) => c.name);
+    const cols = (db.prepare('PRAGMA table_info(tasks)').all() as { name: string }[]).map((c) => c.name);
     for (const col of ['priority', 'deadline', 'is_operator', 'label', 'remark']) {
       assert.ok(cols.includes(col), `missing column ${col}`);
     }
