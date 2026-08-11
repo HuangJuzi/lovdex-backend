@@ -40,6 +40,7 @@ import { assetsRoutes } from './modules/assets/index.js';
 import { initializeDatabase, projectsDb, sessionsDb, tasksDb } from './modules/database/index.js';
 import { buildTasksRouter, createTasksService } from './modules/tasks/index.js';
 import { buildOperatorRouter } from './modules/operators/operator.routes.js';
+import { cleanOperatorWorkspaceLegacySessions } from './modules/operators/operator-cleanup.service.js';
 import { scheduleAutoVerdict } from './modules/operators/operator-verdict.service.js';
 import { sessionsService } from './modules/providers/services/sessions.service.js';
 import { validateApiKey, authenticateToken, authenticateWebSocket } from './middleware/auth.js';
@@ -1403,6 +1404,16 @@ async function startServer() {
     try {
         // Initialize authentication database
         await initializeDatabase();
+
+        // 清理 Lovdex助手 工作区里 is_operator=0 的历史残留会话（破坏性，日志兜底）。
+        try {
+            const cleaned = await cleanOperatorWorkspaceLegacySessions();
+            if (cleaned.removed > 0 || cleaned.failed > 0) {
+                console.log(`[INFO] Cleaned ${cleaned.removed} orphaned non-operator session(s) from the Lovdex 助手 workspace${cleaned.failed > 0 ? ` (${cleaned.failed} failed)` : ''}`);
+            }
+        } catch (error) {
+            console.warn('[WARN] Could not clean operator workspace legacy sessions:', error instanceof Error ? error.message : String(error));
+        }
 
         // Log Claude implementation mode
         console.log(`${c.info('[INFO]')} Using Claude Agents SDK for Claude integration`);
