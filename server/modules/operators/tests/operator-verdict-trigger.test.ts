@@ -61,6 +61,11 @@ function makeRow(overrides: Partial<TaskRow> = {}): TaskRow {
     ai_summary: null,
     verdict_reason: null,
     verdict_at: null,
+    priority: 'P2',
+    deadline: null,
+    is_operator: 0,
+    label: 'other',
+    remark: null,
     ...overrides,
   };
 }
