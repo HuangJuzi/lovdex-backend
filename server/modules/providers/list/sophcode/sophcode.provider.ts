@@ -2,6 +2,7 @@ import { AbstractProvider } from '@/modules/providers/shared/base/abstract.provi
 import { SophcodeProviderAuth } from '@/modules/providers/list/sophcode/sophcode-auth.provider.js';
 import { SophcodeMcpProvider } from '@/modules/providers/list/sophcode/sophcode-mcp.provider.js';
 import { SophcodeProviderModels } from '@/modules/providers/list/sophcode/sophcode-models.provider.js';
+import { SophcodeSessionsProvider } from '@/modules/providers/list/sophcode/sophcode-sessions.provider.js';
 import { SophcodeSkillsProvider } from '@/modules/providers/list/sophcode/sophcode-skills.provider.js';
 import type {
   IProviderAuth,
@@ -17,7 +18,7 @@ export class SophcodeProvider extends AbstractProvider {
   readonly mcp: IProviderMcp = new SophcodeMcpProvider();
   readonly auth: IProviderAuth = new SophcodeProviderAuth();
   readonly skills: IProviderSkills = new SophcodeSkillsProvider();
-  readonly sessions = undefined as unknown as IProviderSessions;
+  readonly sessions: IProviderSessions = new SophcodeSessionsProvider();
   readonly sessionSynchronizer = undefined as unknown as IProviderSessionSynchronizer;
 
   constructor() {
