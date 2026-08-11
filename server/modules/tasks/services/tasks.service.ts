@@ -1,8 +1,7 @@
 import { projectsDb, sessionsDb } from '@/modules/database/index.js';
 import { isTaskEngine, isTaskStatus, TASK_STATUSES, tasksDb } from '@/modules/database/repositories/tasks.db.js';
-import { DEFAULT_OPERATOR_CONFIG, type OperatorConfig } from '@/modules/operators/operator.config.js';
 import { AppError, normalizeProjectPath } from '@/shared/utils.js';
-import type { AiVerdict } from '@/shared/task-status.js';
+import type { AiVerdict, SubStatus } from '@/shared/task-status.js';
 import type { TaskEngine, TaskRow, TaskStatus } from '@/shared/types.js';
 
 export const STATUS_ORDER: readonly TaskStatus[] = TASK_STATUSES;
@@ -27,6 +26,7 @@ export type TaskDbLike = Pick<
   | 'listTasks'
   | 'updateTask'
   | 'updateTaskStatus'
+  | 'updateTaskSubStatus'
   | 'linkSession'
   | 'deleteTask'
   | 'moveTask'
@@ -76,24 +76,6 @@ export function createTasksService(
      */
     getPendingApprovalSessions?: () => Map<string, string>;
     /**
-     * Returns the app session ids that currently have an actively-running run.
-     * Used to derive the realtime `failed` flag on in_progress tasks: a run that
-     * died without a terminal success (failed run, backend restart, crash,
-     * SIGKILL, hung-then-reaped subprocess) never delivers a `session_status`,
-     * so without this the task would read as "进行中" forever. When provided, a
-     * task whose session has no live run is decorated with `failed: true`.
-     * Defaults to undefined (flag is false) so unit tests and installs without
-     * the chat registry are unaffected.
-     */
-    getRunningSessions?: () => Set<string>;
-    /**
-     * Returns the current operator agent configuration. Used by applyVerdict to
-     * decide whether an auto-verdict should also auto-move the task column
-     * (only_plan → todo, done → done). Defaults to DEFAULT_OPERATOR_CONFIG so
-     * unit tests and installs without the config repo are unaffected.
-     */
-    getOperatorConfig?: () => OperatorConfig;
-    /**
      * Fired after a linked session transitions to `completed` (after the
      * in_progress → in_review move). The auto-verdict trigger (T9) hooks here
      * to schedule a headless operator run that judges the session and writes a
@@ -117,36 +99,44 @@ export function createTasksService(
    */
   const deleteSessionHard: (sessionId: string) => Promise<void> =
     opts.deps?.deleteSessionHard
-    ?? ((sessionId) =>
-        import('@/modules/providers/services/sessions.service.js').then(({ sessionsService }) =>
-          sessionsService.deleteOrArchiveSessionById(sessionId, { force: true, deletedFromDisk: true }),
-        ));
+    ?? (async (sessionId) => {
+        const { sessionsService } = await import('@/modules/providers/services/sessions.service.js');
+        await sessionsService.deleteOrArchiveSessionById(sessionId, { force: true, deletedFromDisk: true });
+      });
   const pendingApprovalSessions = opts.getPendingApprovalSessions ?? (() => new Map<string, string>());
-  const runningSessions = opts.getRunningSessions;
 
   /**
-   * Stamps the realtime flags onto a task row. Neither flag is persisted — both
-   * are recomputed from the chat run registry's in-memory sets on every read, so
-   * the board sees the truth whether it loaded the list fresh, reconnected after
-   * a WS drop, or received a live upsert:
-   * - `approval_pending`: the linked session has a pending tool-approval.
-   * - `failed`: the linked session has NO live run while the task reads as
-   *   in_progress. That is the "run died without a terminal success" case —
-   *   failed run, backend restart, crash, SIGKILL, hung-then-reaped subprocess.
-   *   The task keeps its status (and its in_progress column slot); the board
-   *   renders a "失败" badge instead of the running spinner. Opt-in: without a
-   *   `getRunningSessions` source the flag is simply false.
+   * Stamps the realtime approval flags onto a task row and derives the effective
+   * layer-2 `sub_status` for the column the task sits in. `sub_status` on the raw
+   * row is the persisted tag (failed / done / only_plan / needs_review / blocked)
+   * or null; here it is refined per column so the board renders the right badge
+   * whether it loaded fresh, reconnected after a WS drop, or received a live
+   * upsert:
+   * - `approval_pending` / `pending_tool`: the linked session has a pending
+   *   tool-approval, classified by tool (AskUserQuestion / ExitPlanMode / other).
+   * - `sub_status`: in_progress -> waiting_x/failed/running; in_review ->
+   *   pending_acceptance/done. todo/done keep the persisted tag as-is.
    */
   function decorate(row: TaskRow): TaskRow {
     const pendingTool = row.session_id ? pendingApprovalSessions().get(row.session_id as string) ?? null : null;
-    const pending = Boolean(row.session_id) && pendingTool !== null;
-    const failed = Boolean(
-      runningSessions
-      && row.session_id
-      && row.status === 'in_progress'
-      && !runningSessions().has(row.session_id),
-    );
-    return { ...row, approval_pending: pending, pending_tool: pendingTool, failed };
+    const approvalPending = Boolean(row.session_id) && pendingTool !== null;
+    let subStatus: SubStatus | null = row.sub_status;
+    if (row.status === 'in_progress') {
+      if (approvalPending) {
+        subStatus = pendingTool === 'AskUserQuestion' ? 'waiting_answer'
+          : (pendingTool === 'ExitPlanMode' || pendingTool === 'exit_plan_mode') ? 'waiting_plan'
+          : 'waiting_approval';
+      } else if (row.sub_status && row.sub_status !== 'done') {
+        // failed/only_plan/needs_review/blocked are valid in_progress tags; a
+        // stale 'done' (user dragged an AI-done task back) reads as running.
+        subStatus = row.sub_status;
+      } else {
+        subStatus = 'running';
+      }
+    } else if (row.status === 'in_review') {
+      subStatus = row.sub_status === 'done' ? 'done' : 'pending_acceptance';
+    }
+    return { ...row, approval_pending: approvalPending, pending_tool: pendingTool, sub_status: subStatus };
   }
 
   function emit(event: TaskEventInput): void {
@@ -173,7 +163,7 @@ export function createTasksService(
     STATUS_ORDER,
 
     createTask(input: CreateTaskInput): TaskRow {
-      const status = input.status ?? 'backlog';
+      const status = input.status ?? 'todo';
       const provider = input.executorProvider ?? 'claude';
       if (!isTaskStatus(status)) {
         throw new AppError(`invalid status: ${String(status)}`, { code: 'INVALID_STATUS', statusCode: 400 });
@@ -250,8 +240,8 @@ export function createTasksService(
 
       let effective: Parameters<TaskDbLike['updateTask']>[1] = rest;
       if (wantsProjectChange) {
-        if (current.status !== 'backlog' && current.status !== 'todo') {
-          throw new AppError('cannot change project for a task that is not backlog or todo', {
+        if (current.status !== 'todo') {
+          throw new AppError('cannot change project for a task that is not todo', {
             code: 'PROJECT_CHANGE_NOT_ALLOWED',
             statusCode: 400,
           });
@@ -301,13 +291,6 @@ export function createTasksService(
       resolveDb.linkSession(taskId, sessionId);
       const updated = resolveDb.getTask(taskId) ?? row;
       emit({ kind: 'task_upserted', task: updated, actor: 'user' });
-      // A task started directly from the backlog would otherwise never leave
-      // the column: the running session event only advances todo → in_progress.
-      // Advance backlog → todo so the existing state machine can pick it up.
-      // All other statuses are left untouched.
-      if (row.status === 'backlog') {
-        applyStatusChange(taskId, 'todo', 'user');
-      }
       return { sessionId };
     },
 
@@ -321,18 +304,20 @@ export function createTasksService(
           // start, but whenever work resumes on a task that had settled into
           // in_review (or a done task the user reopened to ask for more). The
           // board should never show "评审中/已完成" while the agent is typing.
-          // An already-running task just re-emits its row so live boards
-          // recompute the realtime flags — e.g. a retry on a failed (still
-          // in_progress) task clears its "失败" badge the moment the fresh run
-          // starts.
+          // Clear any persisted `failed` tag: a fresh run supersedes the old
+          // failure, so the badge drops back to the running spinner.
+          resolveDb.updateTaskSubStatus(row.task_id, null);
           if (row.status !== 'in_progress') {
             applyStatusChange(row.task_id, 'in_progress', 'engine');
           } else {
-            emit({ kind: 'task_upserted', task: row, actor: 'engine' });
+            emit({ kind: 'task_upserted', task: resolveDb.getTask(row.task_id) ?? row, actor: 'engine' });
           }
           break;
         case 'completed':
           if (row.status === 'in_progress') applyStatusChange(row.task_id, 'in_review', 'engine');
+          // Reset sub_status once work settles: the task now awaits the AI
+          // verdict (writeSummary), which will fold done/only_plan/… back in.
+          resolveDb.updateTaskSubStatus(row.task_id, null);
           // Fire the auto-verdict hook AFTER the in_review transition. The T9
           // trigger attaches here to schedule a headless operator run. Optional
           // so installs without the trigger (and existing unit tests) are
@@ -341,15 +326,19 @@ export function createTasksService(
           break;
         case 'failed':
           // A failed run does NOT move the task: it keeps its in_progress slot
-          // and the board surfaces the failure via the realtime `failed` flag
-          // (recomputed on every read from the run registry). Emit the row so
-          // live boards swap the running spinner for the "失败" badge.
-          if (row.status === 'in_progress') emit({ kind: 'task_upserted', task: row, actor: 'engine' });
+          // and we persist sub_status='failed' so the board renders the "失败"
+          // badge on load/reconnect (not just via a one-shot live event).
+          if (row.status === 'in_progress') {
+            resolveDb.updateTaskSubStatus(row.task_id, 'failed');
+            emit({ kind: 'task_upserted', task: resolveDb.getTask(row.task_id) ?? row, actor: 'engine' });
+          }
           break;
         case 'aborted':
           // The human stopped the run: roll back to todo so the board stops
           // reading as "进行中". The linked session is preserved, so the user
-          // can still resume it (打开会话) or start a fresh run.
+          // can still resume it (打开会话) or start a fresh run. Clear any
+          // persisted failed tag as part of the rollback.
+          resolveDb.updateTaskSubStatus(row.task_id, null);
           if (row.status === 'in_progress') applyStatusChange(row.task_id, 'todo', 'engine');
           break;
         default:
@@ -370,11 +359,13 @@ export function createTasksService(
     },
 
     /**
-     * Persist the operator agent's post-run verdict (AI summary + verdict bucket +
-     * optional reason) on a task. Broadcasts a task_upserted so live boards swap
-     * the in_review card for the verdict badge the moment the run settles. The
-     * verdict column itself is written by the db layer; this method is the
-     * service-side wrapper that also fires the realtime event.
+     * Persist the operator agent's post-run verdict (AI summary + verdict folded
+     * into sub_status + optional reason) on a task. Broadcasts a task_upserted so
+     * live boards swap the in_review card for the verdict badge the moment the
+     * run settles. A non-`done` verdict on an in_review task moves it back to
+     * in_progress (there is still work to do); a `done` verdict stays in
+     * in_review as a human-acceptance gate. A task the user already dragged out
+     * of in_review is left where it is — only its sub_status tag updates.
      */
     writeSummary(
       taskId: string,
@@ -382,42 +373,36 @@ export function createTasksService(
     ): TaskRow | null {
       const row = resolveDb.writeSummary(taskId, input);
       if (row) emit({ kind: 'task_upserted', task: row, actor: 'engine' });
-      // After persisting the verdict, apply the auto-move policy (only_plan→todo,
-      // done→done when enabled, etc.). This is the natural trigger point: the
-      // headless verdict run writes the verdict via the write_task_summary tool,
-      // which routes here, so the board advances the column as part of the same
-      // settle — no separate caller needed. applyVerdict no-ops the move when
-      // auto_move_enabled is off, leaving the column untouched.
       if (row) {
-        this.applyVerdict(taskId, input.verdict);
+        const current = resolveDb.getTask(taskId);
+        if (current && current.status === 'in_review' && input.verdict !== 'done') {
+          // 非 done 判定移回进行中列；done 判定留评审列（人 gate）。
+          applyStatusChange(taskId, 'in_progress', 'engine');
+        }
         return decorate(resolveDb.getTask(taskId) ?? row);
       }
       return row ? decorate(row) : null;
     },
 
     /**
-     * Apply the auto-move policy for an operator verdict. Called after a verdict
-     * is recorded (writeSummary or an external caller) to advance the task's
-     * column per the operator config:
-     * - only_plan + auto_move_only_plan_to_todo + in_review → todo
-     * - done + auto_move_done + in_review → done
-     * - needs_review / blocked: stay in in_review (human decides)
-     * When auto_move_enabled is off (or no config source), the column is left
-     * untouched. Returns the (possibly moved) decorated row.
+     * Mark tasks whose linked session is no longer running as failed. Called on
+     * backend startup (and any time the run registry is authoritative) to catch
+     * runs that died without delivering a terminal `session_status` — backend
+     * restart, crash, SIGKILL. Each orphaned in_progress task gets a persisted
+     * sub_status='failed' and a re-emit so live boards surface the badge.
+     * Returns the number of tasks changed.
      */
-    applyVerdict(taskId: string, verdict: AiVerdict): TaskRow | null {
-      const cfg = opts.getOperatorConfig?.() ?? DEFAULT_OPERATOR_CONFIG;
-      const row = resolveDb.getTask(taskId);
-      if (!row) return null;
-      if (cfg.auto_move_enabled) {
-        if (verdict === 'only_plan' && cfg.auto_move_only_plan_to_todo && row.status === 'in_review') {
-          applyStatusChange(taskId, 'todo', 'engine');
-        } else if (verdict === 'done' && cfg.auto_move_done && row.status === 'in_review') {
-          applyStatusChange(taskId, 'done', 'engine');
+    reconcileFailedTasks(getRunningSessionIds: () => Set<string>): number {
+      const running = getRunningSessionIds();
+      let changed = 0;
+      for (const row of resolveDb.listTasks({})) {
+        if (row.status === 'in_progress' && row.session_id && !running.has(row.session_id)) {
+          resolveDb.updateTaskSubStatus(row.task_id, 'failed');
+          emit({ kind: 'task_upserted', task: row, actor: 'engine' });
+          changed += 1;
         }
-        // needs_review / blocked: stay in in_review
       }
-      return decorate(resolveDb.getTask(taskId) ?? row);
+      return changed;
     },
   };
 }

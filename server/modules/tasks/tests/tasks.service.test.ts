@@ -55,7 +55,7 @@ function makeDbStub() {
       const row = {
         task_id: 't1',
         ...input,
-        status: input.status ?? 'backlog',
+        status: input.status ?? 'todo',
         session_id: input.sessionId ?? null,
       };
       tasks.set('t1', row as unknown as StoredTask);
@@ -85,6 +85,10 @@ function makeDbStub() {
     updateTaskStatus: (id: string, status: string) => {
       const current = tasks.get(id);
       if (current) tasks.set(id, { ...current, status });
+    },
+    updateTaskSubStatus: (id: string, sub: string | null) => {
+      const current = tasks.get(id);
+      if (current) tasks.set(id, { ...current, sub_status: sub } as StoredTask);
     },
     linkSession: (taskId: string, sessionId: string) => {
       calls.linkSession.push({ taskId, sessionId });
@@ -118,19 +122,19 @@ test('createTask rejects invalid status / engine', () => {
 test('createTask rejects an unknown project', () => {
   const svc = createTasksService(makeDbStub().db, {
     broadcast: () => {},
-    deps: { projectsDb: makeProjectStub(null) },
+    deps: { projectsDb: makeProjectStub() },
   });
   assert.throws(() => svc.createTask({ title: 'x', projectPath: '/p', executorProvider: 'claude' }), /project not found/);
 });
 
-test('createTask defaults status to backlog and broadcasts task_upserted', () => {
+test('createTask defaults status to todo and broadcasts task_upserted', () => {
   const events: unknown[] = [];
   const svc = createTasksService(makeDbStub().db, {
     broadcast: (e) => events.push(e),
     deps: { projectsDb: makeProjectStub('/p') },
   });
   const task = svc.createTask({ title: 'x', projectPath: '/p', executorProvider: 'claude' });
-  assert.equal((task as { status: string }).status, 'backlog');
+  assert.equal((task as { status: string }).status, 'todo');
   assert.equal(events.length, 1);
   assert.equal((events[0] as { actor: string }).actor, 'user');
 });
@@ -181,6 +185,7 @@ test('getTaskBySessionId returns the decorated task for a linked session', () =>
     listTasks: () => [row],
     updateTask: () => row,
     updateTaskStatus: () => {},
+    updateTaskSubStatus: () => {},
     linkSession: () => {},
     deleteTask: () => {},
     moveTask: () => {},
@@ -195,7 +200,7 @@ test('getTaskBySessionId returns the decorated task for a linked session', () =>
   assert.equal(svc.getTaskBySessionId('nope'), null);
 });
 
-test('updateTask: backlog/todo task project change deletes the linked session and unlinks', async () => {
+test('updateTask: todo task project change deletes the linked session and unlinks', async () => {
   const { db } = makeDbStub();
   db.linkSession('t1', 's1');
   const deleted: string[] = [];
@@ -234,8 +239,8 @@ test('updateTask: project change without a session does not delete anything', as
   assert.deepEqual(deleted, []);
 });
 
-test('updateTask: rejects project change for non-backlog/todo tasks', async () => {
-  for (const status of ['in_progress', 'in_review', 'done']) {
+test('updateTask: rejects project change for non-todo tasks', async () => {
+  for (const status of ['in_progress', 'in_review', 'done'] as const) {
     const { db } = makeDbStub();
     db.updateTaskStatus('t1', status);
     const svc = createTasksService(db, {
@@ -244,7 +249,7 @@ test('updateTask: rejects project change for non-backlog/todo tasks', async () =
     });
     await assert.rejects(
       () => svc.updateTask('t1', { projectPath: '/q' }),
-      /not backlog or todo/,
+      /not todo/,
     );
   }
 });

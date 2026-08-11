@@ -182,11 +182,6 @@ const tasksService = createTasksService(tasksDb, {
     // Reconstruct the board's "等你批准" overlay on load/reconnect by reading
     // which sessions currently have pending tool approvals from the run registry.
     getPendingApprovalSessions: () => chatRunRegistry.listPendingApprovalSessions(),
-    // Derive the realtime `failed` flag on in_progress tasks: a run that died
-    // without a terminal success (e.g. backend restart) leaves its session with
-    // no live run, so the board renders a "失败" badge instead of a running
-    // spinner.
-    getRunningSessions: () => new Set(chatRunRegistry.listRunningRuns().map((run) => run.sessionId)),
     // Auto-verdict trigger (T9): when a non-operator session completes, schedule
     // a headless operator run that judges the transcript and writes a summary +
     // verdict onto the task. The is_operator check is the recursion guard —
@@ -200,6 +195,16 @@ const tasksService = createTasksService(tasksDb, {
 });
 // Wire session lifecycle → task status transitions (task↔session linkage).
 setTaskLinkage(tasksService);
+
+// On startup, mark any in_progress task whose linked session is no longer
+// running as failed. A run that died without a terminal session_status (backend
+// restart, crash, SIGKILL) would otherwise read as "进行中" forever; this
+// persists sub_status='failed' so the board shows the "失败" badge on load.
+try {
+    tasksService.reconcileFailedTasks(() => new Set(chatRunRegistry.listRunningRuns().map((run) => run.sessionId)));
+} catch (err) {
+    console.error('reconcileFailedTasks on startup failed:', err);
+}
 
 // Wire the operator headless run deps: the real tasksService (adapted so the
 // string-typed operator tool inputs are narrowed to TaskStatus at the boundary),

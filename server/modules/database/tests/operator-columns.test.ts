@@ -34,9 +34,12 @@ test('tasks table has operator verdict columns', async () => {
     const db = getConnection();
     const cols = db.prepare('PRAGMA table_info(tasks)').all() as { name: string }[];
     const names = cols.map((c) => c.name);
-    for (const c of ['ai_summary', 'verdict', 'verdict_reason', 'verdict_at']) {
+    // The legacy `verdict` column was folded into `sub_status` (T3/T4); the AI
+    // verdict now lives there. The summary/reason/timestamp columns remain.
+    for (const c of ['ai_summary', 'sub_status', 'verdict_reason', 'verdict_at']) {
       assert.ok(names.includes(c), `tasks missing ${c}`);
     }
+    assert.ok(!names.includes('verdict'), 'legacy verdict column should be dropped');
   });
 });
 

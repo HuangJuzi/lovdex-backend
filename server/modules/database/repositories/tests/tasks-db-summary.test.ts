@@ -31,7 +31,7 @@ async function withIsolatedDatabase(runTest: () => void | Promise<void>): Promis
   }
 }
 
-test('writeSummary sets verdict columns and verdict_at', async () => {
+test('writeSummary folds verdict into sub_status and sets verdict_at', async () => {
   await withIsolatedDatabase(() => {
     projectsDb.createProjectPath('/p');
     const created = tasksDb.createTask({ projectPath: '/p', title: 't', executorProvider: 'claude' });
@@ -40,7 +40,7 @@ test('writeSummary sets verdict columns and verdict_at', async () => {
       verdict: 'only_plan',
       reason: '只生成了 plan 文件',
     });
-    assert.equal(updated?.verdict, 'only_plan');
+    assert.equal(updated?.sub_status, 'only_plan');
     assert.equal(updated?.ai_summary, '做了X，没做Y');
     assert.equal(updated?.verdict_reason, '只生成了 plan 文件');
     assert.ok(updated?.verdict_at);
@@ -63,7 +63,7 @@ test('writeSummary persists null reason when omitted', async () => {
       summary: '完成了',
       verdict: 'done',
     });
-    assert.equal(updated?.verdict, 'done');
+    assert.equal(updated?.sub_status, 'done');
     assert.equal(updated?.ai_summary, '完成了');
     assert.equal(updated?.verdict_reason, null);
     assert.ok(updated?.verdict_at);

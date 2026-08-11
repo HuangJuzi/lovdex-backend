@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { getConnection } from '@/modules/database/connection.js';
-import { isAiVerdict, type TaskStatus, type AiVerdict } from '@/shared/task-status.js';
+import { isAiVerdict, type TaskStatus, type AiVerdict, type PersistedSubStatus } from '@/shared/task-status.js';
 import type { TaskEngine, TaskRow } from '@/shared/types.js';
 
 export { TASK_STATUSES, isTaskStatus } from '@/shared/task-status.js';
@@ -160,10 +160,21 @@ export const tasksDb = {
   },
 
   /**
+   * Persist (or clear) the layer-2 sub_status tag on a task. Only the persisted
+   * subset is valid; pass null to clear a stale tag (e.g. when a fresh run
+   * starts and the old "failed" badge should disappear).
+   */
+  updateTaskSubStatus(taskId: string, subStatus: PersistedSubStatus | null): void {
+    const db = getConnection();
+    db.prepare('UPDATE tasks SET sub_status = ?, updated_at = CURRENT_TIMESTAMP WHERE task_id = ?').run(subStatus, taskId);
+  },
+
+  /**
    * Persist the operator agent's post-run verdict on a task: an AI summary,
-   * the verdict bucket, an optional reason, and the moment it was recorded.
-   * Validates the verdict BEFORE touching the DB so an invalid value can never
-   * produce a partial write. Returns the refreshed row (null if the task vanished).
+   * the verdict folded into sub_status, an optional reason, and the moment it
+   * was recorded. Validates the verdict BEFORE touching the DB so an invalid
+   * value can never produce a partial write. Returns the refreshed row (null if
+   * the task vanished).
    */
   writeSummary(taskId: string, input: { summary: string; verdict: AiVerdict; reason?: string | null }): TaskRow | null {
     if (!isAiVerdict(input.verdict)) {
@@ -172,7 +183,7 @@ export const tasksDb = {
     const db = getConnection();
     db.prepare(`
       UPDATE tasks
-      SET ai_summary = ?, verdict = ?, verdict_reason = ?, verdict_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+      SET ai_summary = ?, sub_status = ?, verdict_reason = ?, verdict_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
       WHERE task_id = ?
     `).run(input.summary, input.verdict, input.reason ?? null, taskId);
     return tasksDb.getTask(taskId);

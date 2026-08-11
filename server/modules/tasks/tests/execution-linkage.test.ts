@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { createTasksService } from '@/modules/tasks/services/tasks.service.js';
+import type { AiVerdict, PersistedSubStatus } from '@/shared/task-status.js';
 import type { TaskRow } from '@/shared/types.js';
 
 type Row = TaskRow & { status: TaskRow['status'] };
@@ -14,9 +15,18 @@ function makeDb(initial: Row[]) {
     listTasks: (filter: { status?: TaskRow['status'] } = {}) => filter.status ? rows.filter(t => t.status === filter.status) : rows,
     updateTask: (id: string, u: Partial<TaskRow>) => ({ task_id: id, ...u } as TaskRow),
     updateTaskStatus: (id: string, status: TaskRow['status']) => { const t = rows.find(x => x.task_id === id); if (t) t.status = status; },
+    updateTaskSubStatus: (id: string, sub: PersistedSubStatus | null) => { const t = rows.find(x => x.task_id === id); if (t) t.sub_status = sub; },
     linkSession: () => {},
     deleteTask: () => {},
     moveTask: () => {},
+    writeSummary: (id: string, input: { summary: string; verdict: AiVerdict; reason?: string | null }) => {
+      const t = rows.find(x => x.task_id === id);
+      if (!t) return null;
+      t.ai_summary = input.summary;
+      t.sub_status = input.verdict;
+      t.verdict_reason = input.reason ?? null;
+      return t;
+    },
   };
 }
 
@@ -27,6 +37,7 @@ function makeRow(overrides: Partial<Row> = {}): Row {
     title: 't',
     description: null,
     status: 'todo',
+    sub_status: null,
     executor_provider: 'claude',
     executor_model: null,
     position: 0,
@@ -36,7 +47,6 @@ function makeRow(overrides: Partial<Row> = {}): Row {
     created_at: '2026-01-01',
     updated_at: '2026-01-01',
     ai_summary: null,
-    verdict: null,
     verdict_reason: null,
     verdict_at: null,
     ...overrides,
@@ -57,20 +67,22 @@ test('session completed advances in_progress → in_review', () => {
   assert.equal(rows[0].status, 'in_review');
 });
 
-test('session failed keeps the task in_progress but re-emits the row', () => {
+test('session failed keeps the task in_progress, persists sub_status=failed, re-emits', () => {
   const rows = [makeRow({ status: 'in_progress', session_id: 's1' })];
   const events: unknown[] = [];
   const svc = createTasksService(makeDb(rows), { broadcast: (e) => events.push(e) });
   svc.onSessionStatus('s1', 'failed');
   assert.equal(rows[0].status, 'in_progress');
+  assert.equal(rows[0].sub_status, 'failed');
   assert.equal((events[0] as { kind: string }).kind, 'task_upserted');
 });
 
-test('session aborted rolls back in_progress → todo', () => {
-  const rows = [makeRow({ status: 'in_progress', session_id: 's1' })];
+test('session aborted rolls back in_progress → todo and clears sub_status', () => {
+  const rows = [makeRow({ status: 'in_progress', session_id: 's1', sub_status: 'failed' })];
   const svc = createTasksService(makeDb(rows), { broadcast: () => {} });
   svc.onSessionStatus('s1', 'aborted');
   assert.equal(rows[0].status, 'todo');
+  assert.equal(rows[0].sub_status, null);
 });
 
 test('session event for unknown session is a no-op', () => {
@@ -120,25 +132,28 @@ test('running broadcast carries actor engine', () => {
   assert.equal((events[0] as { actor: string }).actor, 'engine');
 });
 
-test('failed then running stays in_progress (retry loop clears via flag recompute)', () => {
+test('failed then running: persisted failed sub_status clears on the fresh run', () => {
   const rows = [makeRow({ status: 'in_progress', session_id: 's1' })];
   const svc = createTasksService(makeDb(rows), { broadcast: () => {} });
   svc.onSessionStatus('s1', 'failed');
   assert.equal(rows[0].status, 'in_progress');
+  assert.equal(rows[0].sub_status, 'failed');
   svc.onSessionStatus('s1', 'running');
   assert.equal(rows[0].status, 'in_progress');
+  assert.equal(rows[0].sub_status, null);
 });
 
-test('startExecution advances a backlog task to todo and links a session', () => {
-  const rows = [makeRow({ status: 'backlog', session_id: 's1' })];
+test('startExecution links a session without moving a todo task', () => {
+  const rows = [makeRow({ status: 'todo', session_id: 's1' })];
   const svc = createTasksService(makeDb(rows), { broadcast: () => {} });
   const result = svc.startExecution('t1', (provider, projectPath) => `session-${provider}-${projectPath}`);
   assert.deepEqual(result, { sessionId: 'session-claude-/p' });
+  // No auto-advance: the running session event drives todo → in_progress.
   assert.equal(rows[0].status, 'todo');
 });
 
-test('startExecution backlog→todo then running advances to in_progress (full flow)', () => {
-  const rows = [makeRow({ status: 'backlog', session_id: 's1' })];
+test('startExecution todo then running advances to in_progress (full flow)', () => {
+  const rows = [makeRow({ status: 'todo', session_id: 's1' })];
   const svc = createTasksService(makeDb(rows), { broadcast: () => {} });
   svc.startExecution('t1', () => 'session-claude-/p');
   assert.equal(rows[0].status, 'todo');
@@ -146,7 +161,7 @@ test('startExecution backlog→todo then running advances to in_progress (full f
   assert.equal(rows[0].status, 'in_progress');
 });
 
-test('startExecution leaves non-backlog statuses untouched', () => {
+test('startExecution leaves an already in_progress task untouched', () => {
   const rows = [makeRow({ status: 'in_progress', session_id: 's1' })];
   const svc = createTasksService(makeDb(rows), { broadcast: () => {} });
   svc.startExecution('t1', () => 'session-claude-/p');
@@ -165,7 +180,7 @@ test('onSessionApproval broadcasts approval marker without changing status', () 
   assert.equal((events[1] as { approval?: { pending: boolean } }).approval?.pending, false);
 });
 
-test('listTasks decorates approval_pending from the injected pending-sessions set', () => {
+test('listTasks decorates approval_pending from the injected pending-sessions map', () => {
   const rows = [
     makeRow({ task_id: 't1', status: 'in_progress', session_id: 's1' }),
     makeRow({ task_id: 't2', status: 'in_progress', session_id: 's2' }),
@@ -173,7 +188,7 @@ test('listTasks decorates approval_pending from the injected pending-sessions se
   ];
   const svc = createTasksService(makeDb(rows), {
     broadcast: () => {},
-    getPendingApprovalSessions: () => new Set(['s1']),
+    getPendingApprovalSessions: () => new Map([['s1', 'AskUserQuestion']]),
   });
   const list = svc.listTasks();
   const byId = Object.fromEntries(list.map((t) => [t.task_id, t]));
@@ -186,7 +201,7 @@ test('getTask decorates approval_pending so the detail page reconstructs the mar
   const rows = [makeRow({ status: 'in_progress', session_id: 's1' })];
   const svc = createTasksService(makeDb(rows), {
     broadcast: () => {},
-    getPendingApprovalSessions: () => new Set(['s1']),
+    getPendingApprovalSessions: () => new Map([['s1', 'AskUserQuestion']]),
   });
   assert.equal(svc.getTask('t1')?.approval_pending, true);
 });
@@ -196,7 +211,7 @@ test('onSessionApproval stamps approval_pending on the broadcast task row', () =
   const events: unknown[] = [];
   const svc = createTasksService(makeDb(rows), {
     broadcast: (e) => events.push(e),
-    getPendingApprovalSessions: () => new Set(['s1']),
+    getPendingApprovalSessions: () => new Map([['s1', 'AskUserQuestion']]),
   });
   svc.onSessionApproval('s1', true);
   assert.equal((events[0] as { task: { approval_pending?: boolean } }).task.approval_pending, true);
@@ -208,40 +223,42 @@ test('approval_pending defaults to false when no pending-sessions source is wire
   assert.equal(svc.getTask('t1')?.approval_pending, false);
 });
 
-test('decorate flags an orphaned in_progress task as failed (no status change)', () => {
-  const rows = [makeRow({ task_id: 't1', status: 'in_progress', session_id: 's1' })];
+test('decorate derives waiting_answer for an in_progress task pending AskUserQuestion', () => {
+  const rows = [makeRow({ status: 'in_progress', session_id: 's1' })];
   const svc = createTasksService(makeDb(rows), {
     broadcast: () => {},
-    getRunningSessions: () => new Set([]),
+    getPendingApprovalSessions: () => new Map([['s1', 'AskUserQuestion']]),
   });
-  const list = svc.listTasks();
-  assert.equal(rows[0].status, 'in_progress');
-  assert.equal(list[0]?.failed, true);
+  assert.equal(svc.getTask('t1')?.sub_status, 'waiting_answer');
 });
 
-test('decorate does not flag in_progress tasks with a live run', () => {
-  const rows = [makeRow({ task_id: 't1', status: 'in_progress', session_id: 's1' })];
+test('decorate derives waiting_plan for an in_progress task pending ExitPlanMode', () => {
+  const rows = [makeRow({ status: 'in_progress', session_id: 's1' })];
   const svc = createTasksService(makeDb(rows), {
     broadcast: () => {},
-    getRunningSessions: () => new Set(['s1']),
+    getPendingApprovalSessions: () => new Map([['s1', 'ExitPlanMode']]),
   });
-  const list = svc.listTasks();
-  assert.equal(list[0]?.failed, false);
+  assert.equal(svc.getTask('t1')?.sub_status, 'waiting_plan');
 });
 
-test('decorate does not flag non-in_progress tasks even when the session is idle', () => {
-  const rows = [makeRow({ task_id: 't1', status: 'in_review', session_id: 's1' })];
-  const svc = createTasksService(makeDb(rows), {
-    broadcast: () => {},
-    getRunningSessions: () => new Set(),
-  });
-  const list = svc.listTasks();
-  assert.equal(list[0]?.failed, false);
-});
-
-test('failed flag defaults to false when no running-sessions source is wired', () => {
-  const rows = [makeRow({ task_id: 't1', status: 'in_progress', session_id: 's1' })];
+test('decorate surfaces a persisted failed tag on an in_progress task', () => {
+  const rows = [makeRow({ task_id: 't1', status: 'in_progress', session_id: 's1', sub_status: 'failed' })];
   const svc = createTasksService(makeDb(rows), { broadcast: () => {} });
   const list = svc.listTasks();
-  assert.equal(list[0]?.failed, false);
+  assert.equal(rows[0].status, 'in_progress');
+  assert.equal(list[0]?.sub_status, 'failed');
+});
+
+test('decorate derives running for an in_progress task with no persisted tag', () => {
+  const rows = [makeRow({ task_id: 't1', status: 'in_progress', session_id: 's1', sub_status: null })];
+  const svc = createTasksService(makeDb(rows), { broadcast: () => {} });
+  const list = svc.listTasks();
+  assert.equal(list[0]?.sub_status, 'running');
+});
+
+test('decorate derives pending_acceptance for an in_review task awaiting the verdict', () => {
+  const rows = [makeRow({ task_id: 't1', status: 'in_review', session_id: 's1', sub_status: null })];
+  const svc = createTasksService(makeDb(rows), { broadcast: () => {} });
+  const list = svc.listTasks();
+  assert.equal(list[0]?.sub_status, 'pending_acceptance');
 });

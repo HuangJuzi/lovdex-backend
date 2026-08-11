@@ -49,6 +49,7 @@ function makeRow(overrides: Partial<TaskRow> = {}): TaskRow {
     title: 'x',
     description: null,
     status: 'in_progress',
+    sub_status: null,
     executor_provider: 'claude',
     executor_model: null,
     position: 1,
@@ -58,7 +59,6 @@ function makeRow(overrides: Partial<TaskRow> = {}): TaskRow {
     created_at: '2026-01-01T00:00:00.000Z',
     updated_at: '2026-01-01T00:00:00.000Z',
     ai_summary: null,
-    verdict: null,
     verdict_reason: null,
     verdict_at: null,
     ...overrides,
@@ -82,6 +82,10 @@ function makeDb(rows: TaskRow[]) {
       const t = tasks.get(id);
       if (t) t.status = status as TaskStatus;
     },
+    updateTaskSubStatus: (id: string, sub: string | null) => {
+      const t = tasks.get(id);
+      if (t) t.sub_status = sub as TaskRow['sub_status'];
+    },
     linkSession: () => {},
     deleteTask: () => {},
     moveTask: () => {},
@@ -92,7 +96,7 @@ function makeDb(rows: TaskRow[]) {
       const t = tasks.get(taskId);
       if (!t) return null;
       t.ai_summary = input.summary;
-      t.verdict = input.verdict;
+      t.sub_status = input.verdict;
       t.verdict_reason = input.reason ?? null;
       t.verdict_at = new Date().toISOString();
       return t;

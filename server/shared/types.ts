@@ -1,6 +1,6 @@
 import type { IncomingMessage } from 'node:http';
 
-import type { TaskStatus } from '@/shared/task-status.js';
+import type { SubStatus, TaskStatus } from '@/shared/task-status.js';
 
 //----------------- HTTP RESPONSE SHAPES ------------
 /**
@@ -662,6 +662,13 @@ export type TaskRow = {
   title: string;
   description: string | null;
   status: TaskStatus;
+  /**
+   * Layer-2 fine-grained badge. On raw DB rows this is the persisted subset
+   * (failed / done / only_plan / needs_review / blocked) or null; the tasks
+   * service's decorate() derives the effective realtime value (running /
+   * waiting_* / pending_acceptance) on every read.
+   */
+  sub_status: SubStatus | null;
   executor_provider: TaskEngine;
   executor_model: string | null;
   position: number;
@@ -671,7 +678,6 @@ export type TaskRow = {
   created_at: string;
   updated_at: string;
   ai_summary: string | null;
-  verdict: string | null;
   verdict_reason: string | null;
   verdict_at: string | null;
   /**
@@ -689,11 +695,4 @@ export type TaskRow = {
    * Null when not pending. Decorated by the tasks service from the run registry.
    */
   pending_tool?: string | null;
-  /**
-   * Realtime-only flag (never persisted): true when the task reads as
-   * in_progress but its linked session has no live run (a failed/orphaned run).
-   * The task keeps its status; the board renders a "失败" badge instead of the
-   * running spinner. Decorated by the tasks service from the run registry.
-   */
-  failed?: boolean;
 };
