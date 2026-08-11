@@ -122,5 +122,7 @@ test('writeSummary does not move a task the user already dragged out of in_revie
   const out = svc.writeSummary('t1', { summary: 's', verdict: 'blocked', reason: 'r' });
   // Only in_review rows get the auto-move; a todo row stays put.
   assert.equal(rows[0].status, 'todo');
-  assert.equal(out?.sub_status, 'blocked');
+  // The verdict is recorded on the row, but a todo column shows no tag.
+  assert.equal(rows[0].sub_status, 'blocked');
+  assert.equal(out?.sub_status, null);
 });

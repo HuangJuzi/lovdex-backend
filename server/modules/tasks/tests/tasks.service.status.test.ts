@@ -102,8 +102,11 @@ test('writeSummary does not move a task the user already dragged out of in_revie
     svc.onSessionStatus('s1', 'completed');
     svc.applyStatusChange(id, 'todo', 'user');
     svc.writeSummary(id, { summary: 'late', verdict: 'blocked' });
+    // status stays where the user put it (not moved by the late verdict)
     assert.equal(svc.getTask(id)?.status, 'todo');
-    assert.equal(svc.getTask(id)?.sub_status, 'blocked');
+    // the verdict is still recorded as audit on the row
+    assert.equal(tasksDb.getTask(id)?.sub_status, 'blocked');
+    assert.equal(tasksDb.getTask(id)?.verdict_reason, null);
   });
 });
 
@@ -133,5 +136,46 @@ test('reconcileFailedTasks broadcasts the refreshed sub_status, not the stale ro
     const event = matching[matching.length - 1] as { task: { sub_status?: string } };
     assert.ok(event, 'expected a task_upserted broadcast for the reconciled task');
     assert.equal(event.task.sub_status, 'failed');
+  });
+});
+
+test('manual applyStatusChange to done clears a persisted sub_status tag', async () => {
+  await withIsolatedDatabase(() => {
+    const id = seedTask();
+    const svc = makeService();
+    svc.onSessionStatus('s1', 'running');
+    svc.onSessionStatus('s1', 'completed');
+    svc.writeSummary(id, { summary: 'blocked', verdict: 'blocked', reason: 'broke' });
+    // blocked moved it back to in_progress with sub_status='blocked'
+    assert.equal(svc.getTask(id)?.sub_status, 'blocked');
+    // user marks it done
+    svc.applyStatusChange(id, 'done', 'user');
+    assert.equal(svc.getTask(id)?.status, 'done');
+    assert.equal(svc.getTask(id)?.sub_status, null);
+    assert.equal(tasksDb.getTask(id)?.sub_status, null); // persisted clear
+  });
+});
+
+test('moveTask to a different column clears sub_status', async () => {
+  await withIsolatedDatabase(() => {
+    const id = seedTask();
+    const svc = makeService();
+    svc.onSessionStatus('s1', 'running');
+    svc.onSessionStatus('s1', 'failed'); // sub_status='failed'
+    svc.moveTask(id, 'todo', null, null);
+    assert.equal(svc.getTask(id)?.status, 'todo');
+    assert.equal(svc.getTask(id)?.sub_status, null);
+    assert.equal(tasksDb.getTask(id)?.sub_status, null);
+  });
+});
+
+test('applyStatusChange to the same status does not clear sub_status', async () => {
+  await withIsolatedDatabase(() => {
+    const id = seedTask();
+    const svc = makeService();
+    svc.onSessionStatus('s1', 'running');
+    svc.onSessionStatus('s1', 'failed'); // sub_status='failed', status stays in_progress
+    svc.applyStatusChange(id, 'in_progress', 'user'); // same status
+    assert.equal(svc.getTask(id)?.sub_status, 'failed');
   });
 });

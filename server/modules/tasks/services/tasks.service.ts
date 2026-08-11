@@ -135,6 +135,10 @@ export function createTasksService(
       }
     } else if (row.status === 'in_review') {
       subStatus = row.sub_status === 'done' ? 'done' : 'pending_acceptance';
+    } else {
+      // todo / done columns carry no tag — a stale persisted sub_status (e.g. a
+      // task manually completed while tagged) must not surface on the board.
+      subStatus = null;
     }
     return { ...row, approval_pending: approvalPending, pending_tool: pendingTool, sub_status: subStatus };
   }
@@ -153,7 +157,15 @@ export function createTasksService(
     }
     const row = resolveDb.getTask(taskId);
     if (!row) return null;
+    const changed = row.status !== status;
     resolveDb.updateTaskStatus(taskId, status);
+    // A manual status change re-positions the task, so a sub_status tag from the
+    // previous state no longer applies — e.g. 标记完成 clears a stale AI tag.
+    // Engine transitions manage sub_status explicitly (failed sets it,
+    // running/completed/aborted clear it; writeSummary writes the verdict tag).
+    if (changed && actor === 'user') {
+      resolveDb.updateTaskSubStatus(taskId, null);
+    }
     const updated = resolveDb.getTask(taskId) ?? row;
     emit({ kind: 'task_upserted', task: updated, actor });
     return decorate(updated);
@@ -275,7 +287,13 @@ export function createTasksService(
       if (!isTaskStatus(status)) {
         throw new AppError(`invalid status: ${String(status)}`, { code: 'INVALID_STATUS', statusCode: 400 });
       }
+      const current = resolveDb.getTask(taskId);
+      if (!current) return null;
       resolveDb.moveTask(taskId, status, beforeId, afterId);
+      if (current.status !== status) {
+        // Dragging to a different column re-positions the task: clear its tag.
+        resolveDb.updateTaskSubStatus(taskId, null);
+      }
       const row = resolveDb.getTask(taskId);
       if (row) emit({ kind: 'task_upserted', task: row, actor: 'user' });
       return row ? decorate(row) : null;
