@@ -45,3 +45,26 @@ export function isPersistedSubStatus(value: unknown): value is PersistedSubStatu
 export function isAiVerdict(value: unknown): value is AiVerdict {
   return typeof value === 'string' && (AI_VERDICTS as readonly string[]).includes(value);
 }
+
+export const TASK_PRIORITIES = ['P0', 'P1', 'P2', 'P3'] as const;
+export type TaskPriority = (typeof TASK_PRIORITIES)[number];
+
+export function isTaskPriority(value: unknown): value is TaskPriority {
+  return typeof value === 'string' && (TASK_PRIORITIES as readonly string[]).includes(value);
+}
+
+const DEADLINE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Strict YYYY-MM-DD that also resolves to the same calendar date (rejects 2026-02-30). */
+export function isTaskDeadline(value: unknown): value is string {
+  if (typeof value !== 'string' || !DEADLINE_RE.test(value)) return false;
+  const d = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
+}
+
+export const TASK_LABELS = ['bug', 'feature', 'optimization', 'refactor', 'docs', 'other'] as const;
+export type TaskLabel = (typeof TASK_LABELS)[number];
+
+export function isTaskLabel(value: unknown): value is TaskLabel {
+  return typeof value === 'string' && (TASK_LABELS as readonly string[]).includes(value);
+}

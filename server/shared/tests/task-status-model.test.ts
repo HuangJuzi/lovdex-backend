@@ -3,7 +3,8 @@ import test from 'node:test';
 
 import {
   AI_VERDICTS, PERSISTED_SUB_STATUSES, STATUS_ORDER, SUB_STATUSES,
-  isAiVerdict, isPersistedSubStatus, isSubStatus, isTaskStatus,
+  TASK_LABELS, TASK_PRIORITIES, isAiVerdict, isPersistedSubStatus,
+  isSubStatus, isTaskDeadline, isTaskLabel, isTaskPriority, isTaskStatus,
 } from '@/shared/task-status.js';
 
 test('status list is the unified 4', () => {
@@ -30,4 +31,25 @@ test('persisted subset + ai verdicts', () => {
   assert.deepEqual([...AI_VERDICTS], ['done', 'only_plan', 'needs_review', 'blocked']);
   assert.equal(isAiVerdict('blocked'), true);
   assert.equal(isAiVerdict('failed'), false);
+});
+
+test('TASK_PRIORITIES is P0..P3', () => {
+  assert.deepEqual(TASK_PRIORITIES, ['P0', 'P1', 'P2', 'P3']);
+  assert.equal(isTaskPriority('P0'), true);
+  assert.equal(isTaskPriority('P4'), false);
+  assert.equal(isTaskPriority(undefined), false);
+});
+
+test('isTaskDeadline validates YYYY-MM-DD real dates', () => {
+  assert.equal(isTaskDeadline('2026-12-31'), true);
+  assert.equal(isTaskDeadline('2026-02-30'), false);   // 非法日期
+  assert.equal(isTaskDeadline('2026/12/31'), false);   // 分隔符错
+  assert.equal(isTaskDeadline(null), false);
+});
+
+test('TASK_LABELS is the six categories', () => {
+  assert.deepEqual(TASK_LABELS, ['bug', 'feature', 'optimization', 'refactor', 'docs', 'other']);
+  assert.equal(isTaskLabel('bug'), true);
+  assert.equal(isTaskLabel('nope'), false);
+  assert.equal(isTaskLabel(undefined), false);
 });
