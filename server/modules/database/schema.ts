@@ -1,4 +1,4 @@
-import { PERSISTED_SUB_STATUSES, TASK_STATUSES } from '@/shared/task-status.js';
+import { PERSISTED_SUB_STATUSES, TASK_LABELS, TASK_PRIORITIES, TASK_STATUSES } from '@/shared/task-status.js';
 
 const USER_TABLE_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS users (
@@ -125,6 +125,8 @@ CREATE TABLE IF NOT EXISTS sessions (
 
 const STATUS_CHECK = `CHECK (status IN (${TASK_STATUSES.map((s) => `'${s}'`).join(',')}))`;
 const SUB_STATUS_CHECK = `CHECK (sub_status IS NULL OR sub_status IN (${PERSISTED_SUB_STATUSES.map((s) => `'${s}'`).join(',')}))`;
+const PRIORITY_CHECK = `CHECK (priority IN (${TASK_PRIORITIES.map((p) => `'${p}'`).join(',')}))`;
+const LABEL_CHECK = `CHECK (label IN (${TASK_LABELS.map((l) => `'${l}'`).join(',')}))`;
 
 export const TASKS_TABLE_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS tasks (
@@ -145,7 +147,14 @@ CREATE TABLE IF NOT EXISTS tasks (
     ai_summary       TEXT,
     sub_status       TEXT ${SUB_STATUS_CHECK},
     verdict_reason   TEXT,
-    verdict_at       DATETIME
+    verdict_at       DATETIME,
+    priority          TEXT NOT NULL DEFAULT 'P2'
+                      ${PRIORITY_CHECK},
+    deadline          TEXT,
+    is_operator       INTEGER DEFAULT 0,
+    label             TEXT NOT NULL DEFAULT 'other'
+                      ${LABEL_CHECK},
+    remark            TEXT
 );
 `;
 

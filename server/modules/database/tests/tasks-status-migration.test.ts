@@ -89,6 +89,48 @@ test('migrateTasksTable rebuilds: backlog→todo, verdict→sub_status, drops ve
   }
 });
 
+test('migrateTasksTable adds priority/deadline/is_operator/label/remark', async () => {
+  const previousDatabasePath = process.env.DATABASE_PATH;
+  const tempDirectory = await mkdtemp(path.join(tmpdir(), 'migrate-tasks-cols-'));
+  const databasePath = path.join(tempDirectory, 'auth.db');
+
+  closeConnection();
+  process.env.DATABASE_PATH = databasePath;
+
+  const legacy = new Database(databasePath);
+  legacy.exec(`
+    CREATE TABLE projects (
+      project_id TEXT PRIMARY KEY NOT NULL,
+      project_path TEXT NOT NULL UNIQUE,
+      custom_project_name TEXT DEFAULT NULL,
+      isStarred BOOLEAN DEFAULT 0,
+      isArchived BOOLEAN DEFAULT 0
+    );
+  `);
+  legacy.exec(LEGACY_TASKS_DDL);
+  legacy.prepare(`INSERT INTO projects (project_id, project_path) VALUES (?, ?)`).run('p1', '/tmp/example-repo');
+  legacy.prepare(`INSERT INTO tasks (task_id, project_path, title, status) VALUES (?, ?, ?, ?)`).run('t1', '/tmp/example-repo', 'task', 'todo');
+  legacy.close();
+
+  await initializeDatabase();
+
+  try {
+    const db = getConnection();
+    const cols = db.prepare('PRAGMA table_info(tasks)').all().map((c: any) => c.name);
+    for (const col of ['priority', 'deadline', 'is_operator', 'label', 'remark']) {
+      assert.ok(cols.includes(col), `missing column ${col}`);
+    }
+    const row = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'").get() as { sql: string };
+    assert.match(row.sql, /CHECK \(priority IN \('P0','P1','P2','P3'\)\)/);
+    assert.match(row.sql, /CHECK \(label IN \('bug','feature','optimization','refactor','docs','other'\)\)/);
+  } finally {
+    closeConnection();
+    if (previousDatabasePath === undefined) delete process.env.DATABASE_PATH;
+    else process.env.DATABASE_PATH = previousDatabasePath;
+    await rm(tempDirectory, { recursive: true, force: true });
+  }
+});
+
 test('fresh install creates tasks table with sub_status and no verdict column', async () => {
   const previousDatabasePath = process.env.DATABASE_PATH;
   const tempDirectory = await mkdtemp(path.join(tmpdir(), 'migrate-fresh-tasks-'));
