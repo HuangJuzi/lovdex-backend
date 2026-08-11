@@ -179,3 +179,35 @@ test('applyStatusChange to the same status does not clear sub_status', async () 
     assert.equal(svc.getTask(id)?.sub_status, 'failed');
   });
 });
+
+test('done task stays done when its session runs/fails again (user doing other things)', async () => {
+  await withIsolatedDatabase(() => {
+    const id = seedTask();
+    const svc = makeService();
+    svc.onSessionStatus('s1', 'running');
+    svc.onSessionStatus('s1', 'completed');
+    svc.writeSummary(id, { summary: 'done', verdict: 'done', reason: 'ok' });
+    svc.applyStatusChange(id, 'done', 'user');
+    assert.equal(svc.getTask(id)?.status, 'done');
+    // 用户在已完成任务的会话里继续做其他事情 → 任务保持 done
+    svc.onSessionStatus('s1', 'running');
+    svc.onSessionStatus('s1', 'failed');
+    const row = svc.getTask(id);
+    assert.equal(row?.status, 'done');
+    assert.notEqual(row?.sub_status, 'failed');
+  });
+});
+
+test('late verdict does not downgrade a task the user already marked done', async () => {
+  await withIsolatedDatabase(() => {
+    const id = seedTask();
+    const svc = makeService();
+    svc.onSessionStatus('s1', 'running');
+    svc.onSessionStatus('s1', 'completed');
+    svc.applyStatusChange(id, 'done', 'user'); // 用户先标记完成，verdict 还没落
+    svc.writeSummary(id, { summary: 'blocked', verdict: 'blocked', reason: 'broke' });
+    const row = svc.getTask(id);
+    assert.equal(row?.status, 'done');
+    assert.notEqual(row?.sub_status, 'blocked');
+  });
+});

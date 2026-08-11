@@ -378,6 +378,11 @@ export function createTasksService(
     onSessionStatus(sessionId: string, state: 'running' | 'completed' | 'failed' | 'aborted'): void {
       const row = resolveDb.getTaskBySessionId(sessionId);
       if (!row) return;
+      // A task the user marked done is terminal: continuing to chat in its
+      // linked session (often unrelated follow-up work) must not reopen it or
+      // re-judge it. Re-opening a finished task is an explicit act — move it
+      // back to todo/in_progress first.
+      if (row.status === 'done') return;
       switch (state) {
         case 'running':
           // A live run means the agent is actively working, so the task must
@@ -452,6 +457,12 @@ export function createTasksService(
       taskId: string,
       input: { summary: string; verdict: AiVerdict; reason?: string | null },
     ): TaskRow | null {
+      // The user's explicit done wins over a late AI verdict: a verdict that
+      // lands after the task was marked done (e.g. an in-flight headless run)
+      // must not downgrade a finished task's badge or move it off done.
+      if (resolveDb.getTask(taskId)?.status === 'done') {
+        return resolveDb.getTask(taskId);
+      }
       const row = resolveDb.writeSummary(taskId, input);
       if (row) emit({ kind: 'task_upserted', task: row, actor: 'engine' });
       if (row) {
