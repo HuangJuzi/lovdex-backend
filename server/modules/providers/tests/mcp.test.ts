@@ -170,10 +170,11 @@ test('providerMcpService handles codex MCP TOML config and capability validation
 });
 
 /**
- * This test covers OpenCode MCP support for user/project config files, JSONC-compatible
- * reads, and validation for unsupported scope/transport combinations.
+ * This test covers Sophcode (opencode-family) MCP support for user/project config
+ * files, JSONC-compatible reads, and validation for unsupported scope/transport
+ * combinations.
  */
-test('providerMcpService handles opencode MCP config and capability validation', { concurrency: false }, async () => {
+test('providerMcpService handles sophcode MCP config and capability validation', { concurrency: false }, async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'llm-mcp-opencode-'));
   const workspacePath = path.join(tempRoot, 'workspace');
   await fs.mkdir(workspacePath, { recursive: true });
@@ -189,7 +190,7 @@ test('providerMcpService handles opencode MCP config and capability validation',
 
   const restoreHomeDir = patchHomeDir(tempRoot);
   try {
-    await providerMcpService.upsertProviderMcpServer('opencode', {
+    await providerMcpService.upsertProviderMcpServer('sophcode', {
       name: 'opencode-user-stdio',
       scope: 'user',
       transport: 'stdio',
@@ -198,7 +199,7 @@ test('providerMcpService handles opencode MCP config and capability validation',
       env: { API_KEY: 'x' },
     });
 
-    await providerMcpService.upsertProviderMcpServer('opencode', {
+    await providerMcpService.upsertProviderMcpServer('sophcode', {
       name: 'opencode-project-http',
       scope: 'project',
       transport: 'http',
@@ -220,12 +221,12 @@ test('providerMcpService handles opencode MCP config and capability validation',
     assert.equal(projectHttp.type, 'remote');
     assert.equal(projectHttp.url, 'https://opencode.example.com/mcp');
 
-    const grouped = await providerMcpService.listProviderMcpServers('opencode', { workspacePath });
+    const grouped = await providerMcpService.listProviderMcpServers('sophcode', { workspacePath });
     assert.ok(grouped.user.some((server) => server.name === 'opencode-user-stdio' && server.transport === 'stdio'));
     assert.ok(grouped.project.some((server) => server.name === 'opencode-project-http' && server.transport === 'http'));
 
     await assert.rejects(
-      providerMcpService.upsertProviderMcpServer('opencode', {
+      providerMcpService.upsertProviderMcpServer('sophcode', {
         name: 'opencode-local',
         scope: 'local',
         transport: 'stdio',
@@ -238,7 +239,7 @@ test('providerMcpService handles opencode MCP config and capability validation',
     );
 
     await assert.rejects(
-      providerMcpService.upsertProviderMcpServer('opencode', {
+      providerMcpService.upsertProviderMcpServer('sophcode', {
         name: 'opencode-sse',
         scope: 'project',
         transport: 'sse',
@@ -250,44 +251,6 @@ test('providerMcpService handles opencode MCP config and capability validation',
         error.code === 'MCP_TRANSPORT_NOT_SUPPORTED' &&
         error.statusCode === 400,
     );
-  } finally {
-    restoreHomeDir();
-    await fs.rm(tempRoot, { recursive: true, force: true });
-  }
-});
-
-/**
- * This test covers Cursor MCP JSON format and user/project scope persistence.
- */
-test('providerMcpService handles cursor MCP JSON config formats', { concurrency: false }, async () => {
-  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'llm-mcp-gc-'));
-  const workspacePath = path.join(tempRoot, 'workspace');
-  await fs.mkdir(workspacePath, { recursive: true });
-
-  const restoreHomeDir = patchHomeDir(tempRoot);
-  try {
-    await providerMcpService.upsertProviderMcpServer('cursor', {
-      name: 'cursor-stdio',
-      scope: 'project',
-      transport: 'stdio',
-      command: 'npx',
-      args: ['-y', 'mcp-server'],
-      env: { API_KEY: 'value' },
-      workspacePath,
-    });
-
-    await providerMcpService.upsertProviderMcpServer('cursor', {
-      name: 'cursor-http',
-      scope: 'user',
-      transport: 'http',
-      url: 'http://localhost:3333/mcp',
-      headers: { API_KEY: 'value' },
-    });
-
-    const cursorUserConfig = await readJson(path.join(tempRoot, '.cursor', 'mcp.json'));
-    const cursorHttpServer = (cursorUserConfig.mcpServers as Record<string, unknown>)['cursor-http'] as Record<string, unknown>;
-    assert.equal(cursorHttpServer.url, 'http://localhost:3333/mcp');
-    assert.equal(cursorHttpServer.type, undefined);
   } finally {
     restoreHomeDir();
     await fs.rm(tempRoot, { recursive: true, force: true });
@@ -313,7 +276,7 @@ test('providerMcpService global adder writes to all providers and rejects unsupp
       workspacePath,
     });
 
-    assert.equal(globalResult.length, 4);
+    assert.equal(globalResult.length, 3);
     assert.ok(globalResult.every((entry) => entry.created === true));
 
     const claudeProject = await readJson(path.join(workspacePath, '.mcp.json'));
@@ -322,11 +285,8 @@ test('providerMcpService global adder writes to all providers and rejects unsupp
     const codexProject = TOML.parse(await fs.readFile(path.join(workspacePath, '.codex', 'config.toml'), 'utf8')) as Record<string, unknown>;
     assert.ok((codexProject.mcp_servers as Record<string, unknown>)['global-http']);
 
-    const opencodeProject = await readJson(path.join(workspacePath, 'opencode.json'));
-    assert.ok((opencodeProject.mcp as Record<string, unknown>)['global-http']);
-
-    const cursorProject = await readJson(path.join(workspacePath, '.cursor', 'mcp.json'));
-    assert.ok((cursorProject.mcpServers as Record<string, unknown>)['global-http']);
+    const sophcodeProject = await readJson(path.join(workspacePath, 'opencode.json'));
+    assert.ok((sophcodeProject.mcp as Record<string, unknown>)['global-http']);
 
     await assert.rejects(
       providerMcpService.addMcpServerToAllProviders({
