@@ -1,0 +1,75 @@
+import fsSync from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+import Database from 'better-sqlite3';
+
+import { sessionsDb } from '@/modules/database/index.js';
+import type { IProviderSessionSynchronizer } from '@/shared/interfaces.js';
+import { readOptionalString } from '@/shared/utils.js';
+
+const PROVIDER = 'sophcode';
+
+type SophcodeSessionRow = {
+  id: string;
+  title?: string;
+  path?: string;
+  time_created?: number;
+  time_updated?: number;
+};
+
+export class SophcodeSessionSynchronizer implements IProviderSessionSynchronizer {
+  private openDb(): Database.Database {
+    const dbPath = path.join(os.homedir(), '.local', 'share', 'opencode', 'opencode.db');
+    return new Database(dbPath, { readonly: true, fileMustExist: true });
+  }
+
+  async synchronize(_since?: Date): Promise<number> {
+    const dbPath = path.join(os.homedir(), '.local', 'share', 'opencode', 'opencode.db');
+    if (!fsSync.existsSync(dbPath)) {
+      return 0;
+    }
+
+    let db: Database.Database;
+    try {
+      db = this.openDb();
+    } catch {
+      return 0;
+    }
+
+    try {
+      const rows = db.prepare(
+        `SELECT id, title, path, time_created, time_updated FROM session WHERE time_archived IS NULL`,
+      ).all() as SophcodeSessionRow[];
+
+      for (const row of rows) {
+        const projectPath = readOptionalString(row.path) || '';
+        const createdAt = typeof row.time_created === 'number'
+          ? new Date(row.time_created).toISOString()
+          : undefined;
+        const updatedAt = typeof row.time_updated === 'number'
+          ? new Date(row.time_updated).toISOString()
+          : undefined;
+        sessionsDb.createSession(
+          String(row.id),
+          PROVIDER,
+          projectPath,
+          readOptionalString(row.title) || undefined,
+          createdAt,
+          updatedAt,
+          null,
+        );
+      }
+
+      return rows.length;
+    } finally {
+      db.close();
+    }
+  }
+
+  async synchronizeFile(_filePath: string): Promise<string | null> {
+    // opencode.db is a single shared SQLite file; there is no per-file artifact
+    // to incrementally map, so a watcher event degrades to a no-op here.
+    return null;
+  }
+}
