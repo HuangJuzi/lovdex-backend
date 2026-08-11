@@ -88,3 +88,26 @@ test('migrateTasksTable rebuilds: backlog→todo, verdict→sub_status, drops ve
     await rm(tempDirectory, { recursive: true, force: true });
   }
 });
+
+test('fresh install creates tasks table with sub_status and no verdict column', async () => {
+  const previousDatabasePath = process.env.DATABASE_PATH;
+  const tempDirectory = await mkdtemp(path.join(tmpdir(), 'migrate-fresh-tasks-'));
+  const databasePath = path.join(tempDirectory, 'auth.db');
+
+  closeConnection();
+  process.env.DATABASE_PATH = databasePath;
+
+  await initializeDatabase();
+
+  try {
+    const db = getConnection();
+    const cols = db.prepare('PRAGMA table_info(tasks)').all() as { name: string }[];
+    assert.ok(cols.some((c) => c.name === 'sub_status'));
+    assert.ok(!cols.some((c) => c.name === 'verdict'), 'verdict column must not exist on fresh installs');
+  } finally {
+    closeConnection();
+    if (previousDatabasePath === undefined) delete process.env.DATABASE_PATH;
+    else process.env.DATABASE_PATH = previousDatabasePath;
+    await rm(tempDirectory, { recursive: true, force: true });
+  }
+});

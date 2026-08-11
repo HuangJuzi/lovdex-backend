@@ -435,7 +435,6 @@ const migrateTasksTable = (db: Database): void => {
   addColumnToTableIfNotExists(db, 'tasks', taskColumnNames, 'started_at', 'DATETIME');
   addColumnToTableIfNotExists(db, 'tasks', taskColumnNames, 'completed_at', 'DATETIME');
   addColumnToTableIfNotExists(db, 'tasks', taskColumnNames, 'ai_summary', 'TEXT');
-  addColumnToTableIfNotExists(db, 'tasks', taskColumnNames, 'verdict', "TEXT CHECK (verdict IS NULL OR verdict IN ('done','only_plan','needs_review','blocked'))");
   addColumnToTableIfNotExists(db, 'tasks', taskColumnNames, 'verdict_reason', 'TEXT');
   addColumnToTableIfNotExists(db, 'tasks', taskColumnNames, 'verdict_at', 'DATETIME');
 
@@ -444,6 +443,10 @@ const migrateTasksTable = (db: Database): void => {
     console.log('Running migration: rebuild tasks table for two-layer status');
     try {
       db.exec('BEGIN');
+      // Only needed on pre-verdict legacy tables so the INSERT...SELECT below
+      // can read `verdict`; on fresh installs the schema already has sub_status
+      // (no verdict) and this rebuild is skipped entirely.
+      addColumnToTableIfNotExists(db, 'tasks', taskColumnNames, 'verdict', "TEXT CHECK (verdict IS NULL OR verdict IN ('done','only_plan','needs_review','blocked'))");
       // tasks 是叶子表（无表 REFERENCES tasks），无需 PRAGMA foreign_keys 开关。
       db.exec('ALTER TABLE tasks RENAME TO tasks_legacy;');
       db.exec(TASKS_TABLE_SCHEMA_SQL);

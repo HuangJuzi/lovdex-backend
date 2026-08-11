@@ -1,4 +1,4 @@
-import { TASK_STATUSES } from '@/shared/task-status.js';
+import { PERSISTED_SUB_STATUSES, TASK_STATUSES } from '@/shared/task-status.js';
 
 const USER_TABLE_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS users (
@@ -124,6 +124,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 `;
 
 const STATUS_CHECK = `CHECK (status IN (${TASK_STATUSES.map((s) => `'${s}'`).join(',')}))`;
+const SUB_STATUS_CHECK = `CHECK (sub_status IS NULL OR sub_status IN (${PERSISTED_SUB_STATUSES.map((s) => `'${s}'`).join(',')}))`;
 
 export const TASKS_TABLE_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS tasks (
@@ -142,7 +143,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
     ai_summary       TEXT,
-    sub_status       TEXT CHECK (sub_status IS NULL OR sub_status IN ('failed','done','only_plan','needs_review','blocked')),
+    sub_status       TEXT ${SUB_STATUS_CHECK},
     verdict_reason   TEXT,
     verdict_at       DATETIME
 );
