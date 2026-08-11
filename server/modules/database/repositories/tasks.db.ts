@@ -60,6 +60,11 @@ function normalizeTaskRow(row: TaskRow): TaskRow {
     updated_at: normalizeTimestamp(row.updated_at) ?? row.updated_at,
     started_at: row.started_at ? (normalizeTimestamp(row.started_at) ?? row.started_at) : null,
     completed_at: row.completed_at ? (normalizeTimestamp(row.completed_at) ?? row.completed_at) : null,
+    // verdict_at is written by `writeSummary` as CURRENT_TIMESTAMP (UTC, no
+    // suffix). Without this it returns raw "YYYY-MM-DD HH:MM:SS" and the
+    // frontend parses it as local time — showing the verdict timestamp hours
+    // off. Same normalization as the lifecycle timestamps above.
+    verdict_at: row.verdict_at ? (normalizeTimestamp(row.verdict_at) ?? row.verdict_at) : null,
   };
 }
 
