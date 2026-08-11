@@ -9,6 +9,7 @@ import { sessionSynchronizerService } from '@/modules/providers/services/session
 import { WS_OPEN_STATE, connectedClients } from '@/modules/websocket/index.js';
 import type { LLMProvider } from '@/shared/types.js';
 import { generateDisplayName } from '@/modules/projects/index.js';
+import { isOperatorWorkspacePath } from '@/modules/operators/operator-workspace.service.js';
 
 type WatcherEventType = 'add' | 'change';
 
@@ -132,6 +133,8 @@ async function buildSessionUpsertedEvent(updatedProviderSessionId: string): Prom
     ? project.custom_project_name
     : await generateDisplayName(path.basename(projectPath ?? '') || (projectPath ?? ''), projectPath);
 
+  const isOperatorWorkspace = project ? await isOperatorWorkspacePath(project.project_path) : false;
+
   return JSON.stringify({
     kind: 'session_upserted',
     sessionId: row.session_id,
@@ -150,6 +153,7 @@ async function buildSessionUpsertedEvent(updatedProviderSessionId: string): Prom
         fullPath: project.project_path,
         displayName,
         isStarred: Boolean(project.isStarred),
+        isOperatorWorkspace,
       }
       : null,
     timestamp: new Date().toISOString(),

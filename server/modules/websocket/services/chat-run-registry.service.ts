@@ -3,6 +3,7 @@ import path from 'node:path';
 import { projectsDb, sessionsDb } from '@/modules/database/index.js';
 import { writeCustomNameToDisk } from '@/modules/providers/services/write-custom-name-to-disk.js';
 import { generateDisplayName } from '@/modules/projects/index.js';
+import { isOperatorWorkspacePath } from '@/modules/operators/operator-workspace.service.js';
 import { ChatSessionWriter } from '@/modules/websocket/services/chat-session-writer.service.js';
 import { connectedClients, WS_OPEN_STATE } from '@/modules/websocket/services/websocket-state.service.js';
 import type {
@@ -75,6 +76,8 @@ async function broadcastCanonicalSessionUpsert(appSessionId: string): Promise<vo
     ? project.custom_project_name
     : await generateDisplayName(path.basename(projectPath ?? '') || (projectPath ?? ''), projectPath);
 
+  const isOperatorWorkspace = project ? await isOperatorWorkspacePath(project.project_path) : false;
+
   const payload = JSON.stringify({
     kind: 'session_upserted',
     sessionId: row.session_id,
@@ -93,6 +96,7 @@ async function broadcastCanonicalSessionUpsert(appSessionId: string): Promise<vo
         fullPath: project.project_path,
         displayName,
         isStarred: Boolean(project.isStarred),
+        isOperatorWorkspace,
       }
       : null,
     timestamp: new Date().toISOString(),
