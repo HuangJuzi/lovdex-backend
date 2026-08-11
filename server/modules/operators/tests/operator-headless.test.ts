@@ -94,6 +94,45 @@ test('runOperatorHeadless calls query with prompt containing sessionId/taskId/ti
   assert.ok(!('ws' in options) && !('writer' in options), 'ws/writer leaked into headless options');
 });
 
+test('default verdict prompt + systemPrompt anchor on final output and map open questions to needs_review', async () => {
+  let captured: { prompt?: unknown; options?: Record<string, unknown> } = {};
+  const queryFn = (params: { prompt: unknown; options: Record<string, unknown> }) => {
+    captured = params;
+    return emptyIterable();
+  };
+
+  await runOperatorHeadless({
+    sessionId: 'sess-123',
+    taskId: 'task-456',
+    title: 'Implement login',
+    queryFn: queryFn as never,
+    deps: fakeDeps() as never,
+    config: {
+      enabled: true,
+      auto_verdict_enabled: true,
+      model: '',
+      workspace: '/tmp/op',
+      max_concurrent: 1,
+      verdict_prompt_override: null,
+      interactive_chat_enabled: true,
+    },
+  });
+
+  const prompt = String(captured.prompt);
+  // final output is the decisive signal
+  assert.ok(prompt.includes('finalOutput'), 'prompt should name finalOutput as the first-class signal');
+  // an open question / awaiting user decision must map to needs_review
+  assert.ok(prompt.includes('needs_review'), 'prompt should mention needs_review verdict');
+  assert.ok(/提问|确认|决策/.test(prompt), 'prompt should classify pending questions as awaiting decision');
+  // done is reserved for explicit full completion with nothing pending
+  assert.ok(prompt.includes('done'), 'prompt should still describe the done condition');
+
+  const options = captured.options!;
+  const sys = String(options.systemPrompt ?? '');
+  assert.ok(sys.includes('finalOutput'), 'systemPrompt should anchor on finalOutput');
+  assert.ok(sys.includes('needs_review'), 'systemPrompt should mention needs_review');
+});
+
 test('runOperatorHeadless swallows query failures (logs, does not throw)', async () => {
   const throwingQuery = () => {
     return (async function* () {

@@ -1085,7 +1085,15 @@ export async function runOperatorHeadless({ sessionId, taskId, title, promptOver
   }
 
   const prompt = promptOverride ?? cfg.verdict_prompt_override ??
-    `你是 Lovdex Operator。读 session ${sessionId}（任务 ${taskId}: ${title}）的 transcript，判断实际完成度，调 write_task_summary 写入：summary（中文≤3句）、verdict（done|only_plan|needs_review|blocked）、reason（一句）。`;
+    `你是 Lovdex Operator。判断任务 ${taskId}（${title}）在 session ${sessionId} 里的实际完成度。
+
+判定以 get_session_transcript 返回的 finalOutput（最终输出，即最后一条 assistant 消息）为第一依据，再参考整段 transcript 佐证：
+- 最终输出在向用户提问、请求确认或让用户选择下一步（例如「要我提交并推送吗？」「还需要我做什么吗？」）→ verdict = needs_review（待你决策）
+- 最终输出明确表示全部完成、产出已落地、无待用户决策事项 → verdict = done
+- 最终输出只给了计划/方案、没有实际改动 → verdict = only_plan
+- 最终输出表示卡住、需要用户介入才能继续 → verdict = blocked
+
+调 write_task_summary 写入：summary（中文≤3句）、verdict（done|only_plan|needs_review|blocked）、reason（一句，说明判定依据）。`;
 
   try {
     const sdkTools = buildOperatorSdkTools(resolvedDeps);
@@ -1117,7 +1125,7 @@ export async function runOperatorHeadless({ sessionId, taskId, title, promptOver
       // SDK's cache_control-on-middle-block bug that the preset path triggers
       // when combined with a user prompt (API 400 "Extra inputs are not
       // permitted, cache_control").
-      systemPrompt: '你是 Lovdex Operator，一个负责评估任务完成度的助手。你只能调用 lovdex-operator 工具集（list_tasks/get_task/get_session_transcript/write_task_summary 等）。不要试图编辑代码或运行 shell——这些工具不可用。任务完成度判定的关键是读 transcript 看实际产出了什么：是否真改了代码、还是只出了计划、是否卡住。',
+      systemPrompt: '你是 Lovdex Operator，一个负责评估任务完成度的助手。你只能调用 lovdex-operator 工具集（list_tasks/get_task/get_session_transcript/write_task_summary 等）。不要试图编辑代码或运行 shell——这些工具不可用。判定完成度时以 get_session_transcript 的 finalOutput（最终输出，即最后一条 assistant 消息）为第一依据：若它在向用户提问、请求确认或等待用户决策，verdict=needs_review，无论之前做了多少工作；仅当最终输出明确表示全部完成且无待用户决策事项时才判 done。',
       settingSources: ['project', 'user', 'local'],
     };
 

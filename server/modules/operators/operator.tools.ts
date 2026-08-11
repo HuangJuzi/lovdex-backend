@@ -74,6 +74,22 @@ export type OperatorToolDeps = {
   contextProjectPath?: string | null;
 };
 
+/**
+ * Newest assistant text message in a normalized message list, or null. The
+ * verdict agent judges completion primarily from this "final output", so it is
+ * surfaced separately (and untruncated) rather than buried in the transcript.
+ */
+function lastAssistantText(messages: unknown[]): string | null {
+  let last: string | null = null;
+  for (const msg of messages) {
+    const m = msg as { role?: string; kind?: string; content?: string };
+    if ((m.role ?? m.kind ?? 'message') !== 'assistant') continue;
+    const text = (m.content ?? '').trim();
+    if (text) last = text;
+  }
+  return last;
+}
+
 export function buildOperatorTools(deps: OperatorToolDeps) {
   return {
     list_projects: {
@@ -101,7 +117,7 @@ export function buildOperatorTools(deps: OperatorToolDeps) {
     },
     get_session_transcript: {
       description:
-        'Read a session transcript as compact text (user prompts, assistant text, tool_use names + truncated results) to judge task completion. Paginates — pass limit/offset for large sessions. Returns { total, offset, limit, hasMore, transcript } where transcript is plain text.',
+        "Read a session transcript as compact text (user prompts, assistant text, tool_use names + truncated results) to judge task completion. Paginates — pass limit/offset for large sessions. Returns { total, offset, limit, hasMore, transcript, finalOutput } where transcript is plain text and finalOutput is the session's newest assistant text message — the decisive output to judge completion against.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -120,6 +136,18 @@ export function buildOperatorTools(deps: OperatorToolDeps) {
           hasMore?: boolean;
         };
         const messages = Array.isArray(result?.messages) ? result.messages : [];
+        // finalOutput always reflects the session's NEWEST assistant text, even
+        // when paginating older pages — so the verdict agent gets the decisive
+        // final-output signal up front regardless of which page it requested.
+        let finalOutput: string | null;
+        if (offset === 0) {
+          finalOutput = lastAssistantText(messages);
+        } else {
+          const tail = (await deps.sessions!.fetchHistory(i.sessionId, { limit: 10, offset: 0 })) as {
+            messages?: unknown[];
+          };
+          finalOutput = lastAssistantText(Array.isArray(tail?.messages) ? tail.messages : []);
+        }
         // Compact each message to plain text so we don't blow the token budget
         // with raw provider payloads. The operator only needs the gist of what
         // the agent did, not every byte.
@@ -155,6 +183,7 @@ export function buildOperatorTools(deps: OperatorToolDeps) {
           limit,
           hasMore: Boolean(result?.hasMore),
           transcript: lines.join('\n\n') || '(empty transcript)',
+          finalOutput: finalOutput ? finalOutput.slice(0, 2000) : null,
         };
       },
     },
