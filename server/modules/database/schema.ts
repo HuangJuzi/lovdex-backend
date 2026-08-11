@@ -127,6 +127,11 @@ const STATUS_CHECK = `CHECK (status IN (${TASK_STATUSES.map((s) => `'${s}'`).joi
 const SUB_STATUS_CHECK = `CHECK (sub_status IS NULL OR sub_status IN (${PERSISTED_SUB_STATUSES.map((s) => `'${s}'`).join(',')}))`;
 const PRIORITY_CHECK = `CHECK (priority IN (${TASK_PRIORITIES.map((p) => `'${p}'`).join(',')}))`;
 const LABEL_CHECK = `CHECK (label IN (${TASK_LABELS.map((l) => `'${l}'`).join(',')}))`;
+// Task executor engines. Kept in sync with TaskEngine in shared/types.ts and
+// TASK_ENGINES in tasks.db.ts. The CHECK constraint is rebuilt by a migration
+// when a new engine is added so existing DBs accept it.
+const EXECUTOR_PROVIDERS = ['claude', 'codex', 'sophcode'] as const;
+const EXECUTOR_CHECK = `CHECK (executor_provider IN (${EXECUTOR_PROVIDERS.map((p) => `'${p}'`).join(',')}))`;
 
 export const TASKS_TABLE_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS tasks (
@@ -136,7 +141,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     description       TEXT,
     status            TEXT NOT NULL DEFAULT 'todo'
                       ${STATUS_CHECK},
-    executor_provider TEXT NOT NULL DEFAULT 'claude' CHECK (executor_provider IN ('claude','codex')),
+    executor_provider TEXT NOT NULL DEFAULT 'claude'
+                      ${EXECUTOR_CHECK},
     executor_model    TEXT,
     position          REAL NOT NULL DEFAULT 0,
     session_id        TEXT,

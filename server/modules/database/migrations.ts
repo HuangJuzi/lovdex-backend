@@ -477,6 +477,34 @@ const migrateTasksTable = (db: Database): void => {
       throw err;
     }
   }
+
+  // Rebuild tasks table when a new executor engine was added to the
+  // executor_provider CHECK constraint (e.g. sophcode). SQLite can't ALTER a
+  // CHECK, so rename → recreate from the current schema → copy every column →
+  // drop legacy. Re-fetch the table SQL fresh (the sub_status rebuild above may
+  // have just changed it) and gate on the new engine name so it's idempotent.
+  const tasksSqlForEngine =
+    (db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'").get() as { sql?: string } | undefined)?.sql ?? '';
+  if (!tasksSqlForEngine.includes("'sophcode'")) {
+    console.log('Running migration: rebuild tasks table to accept sophcode executor');
+    try {
+      db.exec('BEGIN');
+      db.exec('ALTER TABLE tasks RENAME TO tasks_legacy_engine;');
+      db.exec(TASKS_TABLE_SCHEMA_SQL);
+      db.exec(`
+        INSERT INTO tasks (task_id, project_path, title, description, status, executor_provider, executor_model, position, session_id, started_at, completed_at, created_at, updated_at, ai_summary, sub_status, verdict_reason, verdict_at, priority, deadline, is_operator, label, remark)
+        SELECT task_id, project_path, title, description, status, executor_provider, executor_model, position, session_id, started_at, completed_at, created_at, updated_at, ai_summary, sub_status, verdict_reason, verdict_at, priority, deadline, is_operator, label, remark
+        FROM tasks_legacy_engine;
+      `);
+      db.exec('DROP TABLE tasks_legacy_engine;');
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_project_status ON tasks(project_path, status);`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_id);`);
+      db.exec('COMMIT');
+    } catch (err) {
+      db.exec('ROLLBACK');
+      throw err;
+    }
+  }
 };
 
 export const runMigrations = (db: Database) => {
