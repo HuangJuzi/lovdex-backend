@@ -10,6 +10,7 @@ import crypto from 'node:crypto';
 import express from 'express';
 import cors from 'cors';
 import mime from 'mime-types';
+import Database from 'better-sqlite3';
 
 import { AppError, WORKSPACES_ROOT, validateWorkspacePath } from '@/shared/utils.js';
 import { closeSessionsWatcher, initializeSessionsWatcher } from '@/modules/providers/index.js';
@@ -31,6 +32,10 @@ import {
     queryCodex,
     abortCodexSession,
 } from './openai-codex.js';
+import {
+    abortSophcodeSession,
+    querySophcode,
+} from './sophcode-runner.js';
 import commandsRoutes from './routes/commands.js';
 import sessionsRoutes from './routes/sessions.js';
 import projectModuleRoutes from './modules/projects/projects.routes.js';
@@ -89,10 +94,12 @@ const wss = createWebSocketServer(server, {
         spawnFns: {
             claude: queryClaudeSDK,
             codex: queryCodex,
+            sophcode: querySophcode,
         },
         abortFns: {
             claude: abortClaudeSDKSession,
             codex: abortCodexSession,
+            sophcode: abortSophcodeSession,
         },
         resolveToolApproval,
         getPendingApprovalsForSession,
@@ -1082,6 +1089,52 @@ app.get('/api/projects/:projectId/sessions/:sessionId/token-usage', authenticate
                     output: outputTokens
                 }
             });
+        }
+
+        // Handle Sophcode sessions (opencode-family CLI; token usage lives in
+        // the shared opencode SQLite database).
+        if (provider === 'sophcode') {
+            const dbPath = path.join(homeDir, '.local', 'share', 'opencode', 'opencode.db');
+            if (!fs.existsSync(dbPath)) {
+                return res.status(404).json({ error: 'Sophcode db not found' });
+            }
+
+            let db;
+            try {
+                db = new Database(dbPath, { readonly: true, fileMustExist: true });
+            } catch {
+                return res.status(404).json({ error: 'Sophcode db not found' });
+            }
+            try {
+                const row = db.prepare(
+                    `SELECT tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write
+                     FROM session WHERE id = ?`
+                ).get(providerNativeSessionId);
+                if (!row) {
+                    return res.status(404).json({ error: 'Sophcode session not found', sessionId: safeSessionId });
+                }
+
+                const inputTokens = Number(row.tokens_input || 0) + Number(row.tokens_cache_read || 0);
+                const outputTokens = Number(row.tokens_output || 0);
+                const used = Number(row.tokens_input || 0)
+                    + Number(row.tokens_output || 0)
+                    + Number(row.tokens_reasoning || 0)
+                    + Number(row.tokens_cache_read || 0)
+                    + Number(row.tokens_cache_write || 0);
+
+                return res.json({
+                    used,
+                    total: 200000,
+                    inputTokens,
+                    outputTokens,
+                    breakdown: {
+                        input: inputTokens,
+                        output: outputTokens
+                    }
+                });
+            } finally {
+                db.close();
+            }
         }
 
         // Handle Claude sessions (default)
