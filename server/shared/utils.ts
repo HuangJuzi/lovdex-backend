@@ -142,9 +142,9 @@ function getWorkspaceSymlinkMap(): { target: string; linkAbs: string }[] {
     return workspaceSymlinkMap;
   }
   const map: { target: string; linkAbs: string }[] = [];
-  let entries: ReturnType<typeof fs.readdirSync>;
+  let entries: fs.Dirent<string>[];
   try {
-    entries = fs.readdirSync(WORKSPACES_ROOT, { withFileTypes: true });
+    entries = fs.readdirSync(WORKSPACES_ROOT, { withFileTypes: true }) as fs.Dirent<string>[];
   } catch {
     workspaceSymlinkMap = map;
     return map;
