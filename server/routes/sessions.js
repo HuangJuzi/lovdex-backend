@@ -35,7 +35,7 @@ export async function forkAppSession(deps, appId, { upToMessageId, suffix } = {}
     row.provider_session_id,
     upToMessageId ? { upToMessageId } : undefined,
   );
-  const newAppId = db.createAppSession(row.provider, row.project_path);
+  const newAppId = db.createAppSession(row.provider, row.project_path, Boolean(row.is_operator));
   const baseName = row.custom_name || row.summary || 'Session';
   db.updateSessionCustomName(newAppId, `${baseName} (${suffix})`);
   db.assignProviderSessionId(newAppId, newProviderId);

@@ -68,3 +68,33 @@ test('fork 409 when a run is in progress', async () => {
   assert.equal(status, 409);
   assert.equal(body.error.code, 'RUN_IN_PROGRESS');
 });
+
+test('fork propagates is_operator to the forked app session', async () => {
+  const seen = [];
+  const d = deps({
+    sessionsDb: {
+      getSessionById: () => ({ ...baseRow, is_operator: 1 }),
+      createAppSession: (...args) => { seen.push(args); return 'app2'; },
+      updateSessionCustomName: () => {},
+      assignProviderSessionId: () => {},
+    },
+  });
+  const { status } = await forkAppSession(d, 'app1', { suffix: 'fork' });
+  assert.equal(status, 200);
+  assert.deepEqual(seen, [['claude', '/p', true]]);
+});
+
+test('fork passes false is_operator for a regular session', async () => {
+  const seen = [];
+  const d = deps({
+    sessionsDb: {
+      getSessionById: () => ({ ...baseRow, is_operator: 0 }),
+      createAppSession: (...args) => { seen.push(args); return 'app2'; },
+      updateSessionCustomName: () => {},
+      assignProviderSessionId: () => {},
+    },
+  });
+  const { status } = await forkAppSession(d, 'app1', { suffix: 'fork' });
+  assert.equal(status, 200);
+  assert.deepEqual(seen, [['claude', '/p', false]]);
+});
