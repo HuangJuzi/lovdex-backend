@@ -7,6 +7,7 @@ import { WS_OPEN_STATE, connectedClients } from '@/modules/websocket/index.js';
 import type { RealtimeClientConnection } from '@/shared/types.js';
 import { AppError } from '@/shared/utils.js';
 import { getMainAgentWorkspace } from '@/utils/runtime-paths.js';
+import { isOperatorWorkspacePath } from '@/modules/operators/operator-workspace.service.js';
 
 type SessionSummary = {
   id: string;
@@ -33,6 +34,7 @@ export type ProjectListItem = {
   fullPath: string;
   isStarred: boolean;
   isMainAgentWorkspace: boolean;
+  isOperatorWorkspace?: boolean;
   sessions: SessionSummary[];
   sessionMeta: {
     hasMore: boolean;
@@ -244,6 +246,8 @@ export async function getProjectsWithSessions(
       }
     }
 
+    const isOperatorWorkspace = await isOperatorWorkspacePath(projectPath);
+
     projects.push({
       projectId,
       path: projectPath,
@@ -251,6 +255,7 @@ export async function getProjectsWithSessions(
       fullPath: projectPath,
       isStarred: Boolean(row.isStarred),
       isMainAgentWorkspace,
+      isOperatorWorkspace,
       sessions: sessionsPage.sessions,
       sessionMeta: {
         hasMore: sessionsPage.hasMore,
@@ -297,6 +302,8 @@ export async function getArchivedProjectsWithSessions(
 
     const sessionsPage = readProjectSessionsIncludingArchived(row.project_path);
 
+    const isOperatorWorkspace = await isOperatorWorkspacePath(row.project_path);
+
     archivedProjects.push({
       projectId: row.project_id,
       path: row.project_path,
@@ -304,6 +311,7 @@ export async function getArchivedProjectsWithSessions(
       fullPath: row.project_path,
       isStarred: Boolean(row.isStarred),
       isMainAgentWorkspace: false,
+      isOperatorWorkspace,
       isArchived: true,
       sessions: sessionsPage.sessions,
       sessionMeta: {
