@@ -151,7 +151,7 @@ export class SophcodeMcpProvider extends McpProvider {
     }
     const config = rawConfig as Record<string, unknown>;
     if (config.type === 'local' || Array.isArray(config.command)) {
-      const commandArr = readStringArray(config.command);
+      const commandArr = readStringArray(config.command) ?? [];
       return {
         provider: 'sophcode',
         name,
