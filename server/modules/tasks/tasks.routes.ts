@@ -119,6 +119,7 @@ export function buildTasksRouter(tasksService: TasksService, deps: { createSessi
       if (body.description === null) updates.description = null;
       if (typeof body.executorProvider === 'string') updates.executorProvider = body.executorProvider as TaskEngine;
       if (typeof body.executorModel === 'string') updates.executorModel = body.executorModel;
+      if (body.executorModel === null) updates.executorModel = null;
       if (typeof body.sessionId === 'string' || body.sessionId === null) updates.sessionId = body.sessionId;
       if (typeof body.projectPath === 'string') updates.projectPath = body.projectPath;
       if (typeof body.priority === 'string') updates.priority = body.priority as TaskPriority;
