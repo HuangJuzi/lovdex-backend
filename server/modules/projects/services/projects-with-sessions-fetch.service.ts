@@ -6,6 +6,7 @@ import { sessionSynchronizerService } from '@/modules/providers/index.js';
 import { WS_OPEN_STATE, connectedClients } from '@/modules/websocket/index.js';
 import type { RealtimeClientConnection } from '@/shared/types.js';
 import { AppError } from '@/shared/utils.js';
+import { getAppRoot } from '@/utils/runtime-paths.js';
 
 type SessionSummary = {
   id: string;
@@ -31,6 +32,7 @@ export type ProjectListItem = {
   displayName: string;
   fullPath: string;
   isStarred: boolean;
+  isMainAgentWorkspace: boolean;
   sessions: SessionSummary[];
   sessionMeta: {
     hasMore: boolean;
@@ -177,6 +179,18 @@ function broadcastProgress(progress: ProgressUpdate) {
   });
 }
 
+let mainAgentRootReal: string | null | undefined; // undefined = 未计算
+async function resolveMainAgentRoot(): Promise<string | null> {
+  if (mainAgentRootReal === undefined) {
+    try {
+      mainAgentRootReal = await fs.realpath(getAppRoot());
+    } catch {
+      mainAgentRootReal = null;
+    }
+  }
+  return mainAgentRootReal;
+}
+
 /**
  * Reads all projects from DB and returns normalized session summaries.
  */
@@ -220,12 +234,23 @@ export async function getProjectsWithSessions(
       offset: options.sessionsOffset,
     });
 
+    const mainAgentRoot = await resolveMainAgentRoot();
+    let isMainAgentWorkspace = false;
+    if (mainAgentRoot) {
+      try {
+        isMainAgentWorkspace = (await fs.realpath(projectPath)) === mainAgentRoot;
+      } catch {
+        isMainAgentWorkspace = false;
+      }
+    }
+
     projects.push({
       projectId,
       path: projectPath,
       displayName,
       fullPath: projectPath,
       isStarred: Boolean(row.isStarred),
+      isMainAgentWorkspace,
       sessions: sessionsPage.sessions,
       sessionMeta: {
         hasMore: sessionsPage.hasMore,
@@ -278,6 +303,7 @@ export async function getArchivedProjectsWithSessions(
       displayName,
       fullPath: row.project_path,
       isStarred: Boolean(row.isStarred),
+      isMainAgentWorkspace: false,
       isArchived: true,
       sessions: sessionsPage.sessions,
       sessionMeta: {

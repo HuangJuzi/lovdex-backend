@@ -35,3 +35,7 @@ export function findAppRoot(startDir) {
     ? path.dirname(parentOfServerRoot)
     : parentOfServerRoot;
 }
+
+export function getAppRoot() {
+  return findAppRoot(getModuleDir(import.meta.url));
+}
