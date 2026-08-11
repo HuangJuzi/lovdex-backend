@@ -4,6 +4,39 @@ import test from 'node:test';
 import { builtInCommands, executeModelsCommand } from '../commands.js';
 import { providerModelsService } from '../../modules/providers/services/provider-models.service.js';
 
+test('models command resolves sophcode as its own provider with a Sophcode label', async () => {
+  const originalGetProviderModels = providerModelsService.getProviderModels;
+  const originalGetCurrentActiveModel = providerModelsService.getCurrentActiveModel;
+
+  providerModelsService.getProviderModels = async () => ({
+    models: {
+      OPTIONS: [{ value: 'opencode/deepseek-v4-flash-free', label: 'opencode/deepseek-v4-flash-free' }],
+      DEFAULT: 'opencode/deepseek-v4-flash-free',
+    },
+    cache: {
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      expiresAt: '2026-01-04T00:00:00.000Z',
+      source: 'fresh',
+    },
+  });
+  providerModelsService.getCurrentActiveModel = async () => ({ model: 'opencode/deepseek-v4-flash-free' });
+
+  try {
+    const result = await executeModelsCommand([], {
+      provider: 'sophcode',
+      model: 'opencode/deepseek-v4-flash-free',
+    });
+
+    assert.equal(result.data.current.provider, 'sophcode');
+    assert.equal(result.data.current.providerLabel, 'Sophcode');
+    assert.deepEqual(Object.keys(result.data.available), ['sophcode']);
+    assert.ok(result.data.availableModels.includes('opencode/deepseek-v4-flash-free'));
+  } finally {
+    providerModelsService.getProviderModels = originalGetProviderModels;
+    providerModelsService.getCurrentActiveModel = originalGetCurrentActiveModel;
+  }
+});
+
 test('models command returns available models only for the active provider', async () => {
   const originalGetProviderModels = providerModelsService.getProviderModels;
   const originalGetCurrentActiveModel = providerModelsService.getCurrentActiveModel;
