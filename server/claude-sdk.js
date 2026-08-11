@@ -949,7 +949,7 @@ function reconnectSessionWriter(sessionId, newRawWs) {
  * The deps type uses `status?: string` (the model sends arbitrary strings)
  * while the service uses `status?: TaskStatus`. The service already validates
  * internally and throws on invalid status, but to keep the type narrowing
- * explicit and mirror write_task_summary's isTaskVerdict guard, we validate
+ * explicit and mirror write_task_summary's isAiVerdict guard, we validate
  * with isTaskStatus at the adapter boundary and throw a clear error before
  * delegating. This is the clean assignability resolution (approach a) — no
  * unsafe cast.

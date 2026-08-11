@@ -4,10 +4,11 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { closeConnection } from '@/modules/database/connection.js';
+import { closeConnection, getConnection } from '@/modules/database/connection.js';
 import { initializeDatabase } from '@/modules/database/init-db.js';
 import { projectsDb } from '@/modules/database/repositories/projects.db.js';
 import { tasksDb } from '@/modules/database/repositories/tasks.db.js';
+import { TASK_STATUSES } from '@/shared/task-status.js';
 
 async function withIsolatedDatabase(runTest: () => void | Promise<void>): Promise<void> {
   const previousDatabasePath = process.env.DATABASE_PATH;
@@ -178,5 +179,15 @@ test('tasksDb.createTask honors status + sessionId + lifecycle timestamps', asyn
     assert.equal(backlog.session_id, null);
     assert.equal(backlog.started_at, null);
     assert.equal(backlog.completed_at, null);
+  });
+});
+
+test('tasks status CHECK reflects the canonical status list', async () => {
+  await withIsolatedDatabase(() => {
+    const db = getConnection();
+    const sql = (db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'").get() as { sql: string }).sql;
+    for (const s of TASK_STATUSES) {
+      assert.ok(sql.includes(`'${s}'`), `tasks CHECK missing ${s}`);
+    }
   });
 });

@@ -1,5 +1,7 @@
 import type { IncomingMessage } from 'node:http';
 
+import type { TaskStatus } from '@/shared/task-status.js';
+
 //----------------- HTTP RESPONSE SHAPES ------------
 /**
  * Canonical success envelope used by backend APIs that return a structured payload.
@@ -636,23 +638,11 @@ export type WorkspacePathValidationResult = {
 /**
  * Lifecycle states a task can be in on the task board.
  *
- * `backlog` is unstarted work, `todo` is queued, `in_progress` is actively being
- * executed, `in_review` is awaiting verification, and `done` is complete.
+ * Canonical definition lives in `@/shared/task-status.js` (the single source of
+ * truth for the two-layer status domain); re-exported here for existing
+ * consumers that import task types from this module.
  */
-export type TaskStatus = 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'done';
-
-/**
- * Operator-agent verdicts recorded on a task once execution settles.
- *
- * `done` is fully complete, `only_plan` produced a plan without execution,
- * `needs_review` requires a human decision, and `blocked` hit an unrecoverable
- * obstacle. Mirrors the `tasks.verdict` CHECK constraint exactly.
- */
-export type TaskVerdict = 'done' | 'only_plan' | 'needs_review' | 'blocked';
-export const TASK_VERDICTS: readonly TaskVerdict[] = ['done', 'only_plan', 'needs_review', 'blocked'];
-export function isTaskVerdict(value: unknown): value is TaskVerdict {
-  return typeof value === 'string' && (TASK_VERDICTS as readonly string[]).includes(value);
-}
+export type { TaskStatus } from '@/shared/task-status.js';
 
 /**
  * Executor engines supported by task execution.
@@ -681,7 +671,7 @@ export type TaskRow = {
   created_at: string;
   updated_at: string;
   ai_summary: string | null;
-  verdict: TaskVerdict | null;
+  verdict: string | null;
   verdict_reason: string | null;
   verdict_at: string | null;
   /**

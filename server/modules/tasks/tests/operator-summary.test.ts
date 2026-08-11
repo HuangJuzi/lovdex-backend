@@ -4,7 +4,8 @@ import test from 'node:test';
 import { DEFAULT_OPERATOR_CONFIG } from '@/modules/operators/operator.config.js';
 import { createTasksService } from '@/modules/tasks/services/tasks.service.js';
 import type { TaskDbLike } from '@/modules/tasks/services/tasks.service.js';
-import type { TaskRow, TaskStatus, TaskVerdict } from '@/shared/types.js';
+import type { AiVerdict } from '@/shared/task-status.js';
+import type { TaskRow, TaskStatus } from '@/shared/types.js';
 
 /**
  * Builds a fully-populated TaskRow (verdict fields default to null) with the
@@ -62,7 +63,7 @@ function makeDb(rows: TaskRow[]) {
     moveTask: () => {},
     writeSummary: (
       taskId: string,
-      input: { summary: string; verdict: TaskVerdict; reason?: string | null },
+      input: { summary: string; verdict: AiVerdict; reason?: string | null },
     ): TaskRow | null => {
       const current = tasks.get(taskId);
       if (!current) return null;

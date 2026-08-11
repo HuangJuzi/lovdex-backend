@@ -1,15 +1,11 @@
 import { randomUUID } from 'node:crypto';
 
 import { getConnection } from '@/modules/database/connection.js';
-import { isTaskVerdict } from '@/shared/types.js';
-import type { TaskEngine, TaskRow, TaskStatus, TaskVerdict } from '@/shared/types.js';
+import { isAiVerdict, type TaskStatus, type AiVerdict } from '@/shared/task-status.js';
+import type { TaskEngine, TaskRow } from '@/shared/types.js';
 
-export const TASK_STATUSES: readonly TaskStatus[] = ['backlog', 'todo', 'in_progress', 'in_review', 'done'];
+export { TASK_STATUSES, isTaskStatus } from '@/shared/task-status.js';
 export const TASK_ENGINES: readonly TaskEngine[] = ['claude', 'codex'];
-
-export function isTaskStatus(value: unknown): value is TaskStatus {
-  return typeof value === 'string' && (TASK_STATUSES as readonly string[]).includes(value);
-}
 
 export function isTaskEngine(value: unknown): value is TaskEngine {
   return typeof value === 'string' && (TASK_ENGINES as readonly string[]).includes(value);
@@ -169,8 +165,8 @@ export const tasksDb = {
    * Validates the verdict BEFORE touching the DB so an invalid value can never
    * produce a partial write. Returns the refreshed row (null if the task vanished).
    */
-  writeSummary(taskId: string, input: { summary: string; verdict: TaskVerdict; reason?: string | null }): TaskRow | null {
-    if (!isTaskVerdict(input.verdict)) {
+  writeSummary(taskId: string, input: { summary: string; verdict: AiVerdict; reason?: string | null }): TaskRow | null {
+    if (!isAiVerdict(input.verdict)) {
       throw new Error(`invalid verdict: ${String(input.verdict)}`);
     }
     const db = getConnection();

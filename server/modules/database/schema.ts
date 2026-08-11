@@ -1,3 +1,5 @@
+import { TASK_STATUSES } from '@/shared/task-status.js';
+
 const USER_TABLE_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -121,6 +123,8 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 `;
 
+const STATUS_CHECK = `CHECK (status IN (${TASK_STATUSES.map((s) => `'${s}'`).join(',')}))`;
+
 export const TASKS_TABLE_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS tasks (
     task_id           TEXT PRIMARY KEY NOT NULL,
@@ -128,7 +132,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     title             TEXT NOT NULL,
     description       TEXT,
     status            TEXT NOT NULL DEFAULT 'backlog'
-                      CHECK (status IN ('backlog','todo','in_progress','in_review','done')),
+                      ${STATUS_CHECK},
     executor_provider TEXT NOT NULL DEFAULT 'claude' CHECK (executor_provider IN ('claude','codex')),
     executor_model    TEXT,
     position          REAL NOT NULL DEFAULT 0,

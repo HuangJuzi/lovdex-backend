@@ -11,7 +11,8 @@ import {
 } from '@/modules/operators/operator-verdict.service.js';
 import { createTasksService } from '@/modules/tasks/services/tasks.service.js';
 import type { TaskDbLike } from '@/modules/tasks/services/tasks.service.js';
-import type { TaskRow, TaskStatus, TaskVerdict } from '@/shared/types.js';
+import type { AiVerdict } from '@/shared/task-status.js';
+import type { TaskRow, TaskStatus } from '@/shared/types.js';
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -86,7 +87,7 @@ function makeDb(rows: TaskRow[]) {
     moveTask: () => {},
     writeSummary: (
       taskId: string,
-      input: { summary: string; verdict: TaskVerdict; reason?: string | null },
+      input: { summary: string; verdict: AiVerdict; reason?: string | null },
     ): TaskRow | null => {
       const t = tasks.get(taskId);
       if (!t) return null;

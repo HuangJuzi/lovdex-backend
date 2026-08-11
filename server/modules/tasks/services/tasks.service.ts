@@ -2,7 +2,8 @@ import { projectsDb, sessionsDb } from '@/modules/database/index.js';
 import { isTaskEngine, isTaskStatus, TASK_STATUSES, tasksDb } from '@/modules/database/repositories/tasks.db.js';
 import { DEFAULT_OPERATOR_CONFIG, type OperatorConfig } from '@/modules/operators/operator.config.js';
 import { AppError, normalizeProjectPath } from '@/shared/utils.js';
-import type { TaskEngine, TaskRow, TaskStatus, TaskVerdict } from '@/shared/types.js';
+import type { AiVerdict } from '@/shared/task-status.js';
+import type { TaskEngine, TaskRow, TaskStatus } from '@/shared/types.js';
 
 export const STATUS_ORDER: readonly TaskStatus[] = TASK_STATUSES;
 
@@ -377,7 +378,7 @@ export function createTasksService(
      */
     writeSummary(
       taskId: string,
-      input: { summary: string; verdict: TaskVerdict; reason?: string | null },
+      input: { summary: string; verdict: AiVerdict; reason?: string | null },
     ): TaskRow | null {
       const row = resolveDb.writeSummary(taskId, input);
       if (row) emit({ kind: 'task_upserted', task: row, actor: 'engine' });
@@ -404,7 +405,7 @@ export function createTasksService(
      * When auto_move_enabled is off (or no config source), the column is left
      * untouched. Returns the (possibly moved) decorated row.
      */
-    applyVerdict(taskId: string, verdict: TaskVerdict): TaskRow | null {
+    applyVerdict(taskId: string, verdict: AiVerdict): TaskRow | null {
       const cfg = opts.getOperatorConfig?.() ?? DEFAULT_OPERATOR_CONFIG;
       const row = resolveDb.getTask(taskId);
       if (!row) return null;

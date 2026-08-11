@@ -1,4 +1,5 @@
-import { isTaskVerdict, type TaskEngine, type TaskVerdict } from '@/shared/types.js';
+import { isAiVerdict, type AiVerdict } from '@/shared/task-status.js';
+import type { TaskEngine } from '@/shared/types.js';
 
 /**
  * Dependencies injected into the operator tool set so handlers are testable
@@ -32,7 +33,7 @@ export type OperatorToolDeps = {
     getTask: (id: string) => unknown;
     writeSummary: (
       id: string,
-      i: { summary: string; verdict: TaskVerdict; reason?: string | null },
+      i: { summary: string; verdict: AiVerdict; reason?: string | null },
     ) => unknown;
     startExecution: (
       id: string,
@@ -247,10 +248,10 @@ export function buildOperatorTools(deps: OperatorToolDeps) {
         verdict: string;
         reason?: string;
       }) => {
-        if (!isTaskVerdict(i.verdict)) throw new Error(`invalid verdict: ${i.verdict}`);
+        if (!isAiVerdict(i.verdict)) throw new Error(`invalid verdict: ${i.verdict}`);
         return deps.tasks.writeSummary(i.taskId, {
           summary: i.summary,
-          verdict: i.verdict as TaskVerdict,
+          verdict: i.verdict as AiVerdict,
           reason: i.reason,
         });
       },
