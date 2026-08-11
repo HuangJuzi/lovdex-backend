@@ -160,7 +160,7 @@ export function buildOperatorTools(deps: OperatorToolDeps) {
     },
     create_task: {
       description:
-        'Create a task (defaults to todo/代办). Uses contextProjectPath if projectPath omitted.',
+        'Create a task (defaults to todo). Uses contextProjectPath if projectPath omitted.',
       inputSchema: {
         type: 'object',
         properties: {

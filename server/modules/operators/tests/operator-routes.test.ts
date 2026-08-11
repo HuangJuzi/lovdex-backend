@@ -71,7 +71,6 @@ test('GET /api/operator/settings returns the default config', async () => {
       const res = await fetch(`${baseUrl}/api/operator/settings`);
       assert.equal(res.status, 200);
       const body = (await res.json()) as Record<string, unknown>;
-      assert.equal(body.auto_move_done, false);
       assert.equal(body.enabled, true);
       assert.equal(body.auto_verdict_enabled, true);
     } finally {
@@ -87,16 +86,16 @@ test('PUT /api/operator/settings persists and a subsequent GET reads it back', a
       const putRes = await fetch(`${baseUrl}/api/operator/settings`, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ auto_move_done: true }),
+        body: JSON.stringify({ auto_verdict_enabled: false }),
       });
       assert.equal(putRes.status, 200);
       const putBody = (await putRes.json()) as Record<string, unknown>;
-      assert.equal(putBody.auto_move_done, true);
+      assert.equal(putBody.auto_verdict_enabled, false);
 
       const getRes = await fetch(`${baseUrl}/api/operator/settings`);
       assert.equal(getRes.status, 200);
       const getBody = (await getRes.json()) as Record<string, unknown>;
-      assert.equal(getBody.auto_move_done, true);
+      assert.equal(getBody.auto_verdict_enabled, false);
     } finally {
       await close();
     }

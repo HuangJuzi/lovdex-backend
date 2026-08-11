@@ -6,10 +6,10 @@
  * stored partial over defaults so new fields pick up their default value
  * automatically without a migration.
  *
- * "Safe defaults" philosophy: out-of-box works with conservative automation —
- * auto-verdict on, auto-move on for only_plan→todo, but `done` stays
- * in_review (human gates completion). `auto_move_done: false` is the key
- * safe default.
+ * "Safe defaults" philosophy: out-of-box works with conservative automation.
+ * AI verdicts write `sub_status` directly onto the task; a `done` verdict keeps
+ * the task in the 评审 (review) column so a human gates real completion, while
+ * only_plan / needs_review / blocked move the task back to 进行中 (in progress).
  */
 
 import os from 'node:os';
@@ -19,9 +19,6 @@ import { appConfigDb } from '@/modules/database/repositories/app-config.js';
 export type OperatorConfig = {
   enabled: boolean;
   auto_verdict_enabled: boolean;
-  auto_move_enabled: boolean;
-  auto_move_done: boolean;
-  auto_move_only_plan_to_todo: boolean;
   model: string;
   workspace: string;
   max_concurrent: number;
@@ -32,9 +29,6 @@ export type OperatorConfig = {
 export const DEFAULT_OPERATOR_CONFIG: OperatorConfig = {
   enabled: true,
   auto_verdict_enabled: true,
-  auto_move_enabled: true,
-  auto_move_done: false,
-  auto_move_only_plan_to_todo: true,
   model: process.env.LOVDEX_OPERATOR_MODEL ?? '',
   workspace:
     process.env.LOVDEX_OPERATOR_WORKSPACE ?? `${os.homedir()}/.lovdex/operator-workspace`,

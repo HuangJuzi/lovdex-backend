@@ -38,9 +38,6 @@ test('default config has safe automation defaults', () => {
   const c = DEFAULT_OPERATOR_CONFIG;
   assert.equal(c.enabled, true);
   assert.equal(c.auto_verdict_enabled, true);
-  assert.equal(c.auto_move_enabled, true);
-  assert.equal(c.auto_move_done, false); // 人 gate 完成
-  assert.equal(c.auto_move_only_plan_to_todo, true);
   assert.equal(c.interactive_chat_enabled, true);
   assert.equal(c.max_concurrent, 2);
 });
@@ -54,8 +51,8 @@ test('getOperatorConfig returns defaults when nothing stored', async () => {
 
 test('setOperatorConfig persists and getOperatorConfig reads back', async () => {
   await withIsolatedDatabase(() => {
-    setOperatorConfig({ auto_move_done: true });
+    setOperatorConfig({ auto_verdict_enabled: false });
     const c = getOperatorConfig();
-    assert.equal(c.auto_move_done, true);
+    assert.equal(c.auto_verdict_enabled, false);
   });
 });

@@ -71,9 +71,6 @@ test('runOperatorHeadless calls query with prompt containing sessionId/taskId/ti
     config: {
       enabled: true,
       auto_verdict_enabled: true,
-      auto_move_enabled: true,
-      auto_move_done: false,
-      auto_move_only_plan_to_todo: true,
       model: '',
       workspace: '/tmp/op',
       max_concurrent: 1,
@@ -114,9 +111,6 @@ test('runOperatorHeadless swallows query failures (logs, does not throw)', async
     config: {
       enabled: true,
       auto_verdict_enabled: true,
-      auto_move_enabled: true,
-      auto_move_done: false,
-      auto_move_only_plan_to_todo: true,
       model: '',
       workspace: '/tmp/op',
       max_concurrent: 1,
@@ -142,9 +136,6 @@ test('runOperatorHeadless returns early without calling query when auto_verdict_
     config: {
       enabled: true,
       auto_verdict_enabled: false,
-      auto_move_enabled: true,
-      auto_move_done: false,
-      auto_move_only_plan_to_todo: true,
       model: '',
       workspace: '/tmp/op',
       max_concurrent: 1,
@@ -172,9 +163,6 @@ test('runOperatorHeadless returns early when operator disabled', async () => {
     config: {
       enabled: false,
       auto_verdict_enabled: true,
-      auto_move_enabled: true,
-      auto_move_done: false,
-      auto_move_only_plan_to_todo: true,
       model: '',
       workspace: '/tmp/op',
       max_concurrent: 1,
