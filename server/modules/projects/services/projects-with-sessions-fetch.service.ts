@@ -6,7 +6,7 @@ import { sessionSynchronizerService } from '@/modules/providers/index.js';
 import { WS_OPEN_STATE, connectedClients } from '@/modules/websocket/index.js';
 import type { RealtimeClientConnection } from '@/shared/types.js';
 import { AppError } from '@/shared/utils.js';
-import { getAppRoot } from '@/utils/runtime-paths.js';
+import { getMainAgentWorkspace } from '@/utils/runtime-paths.js';
 
 type SessionSummary = {
   id: string;
@@ -183,7 +183,7 @@ let mainAgentRootReal: string | null | undefined; // undefined = 未计算
 async function resolveMainAgentRoot(): Promise<string | null> {
   if (mainAgentRootReal === undefined) {
     try {
-      mainAgentRootReal = await fs.realpath(getAppRoot());
+      mainAgentRootReal = await fs.realpath(getMainAgentWorkspace());
     } catch {
       mainAgentRootReal = null;
     }

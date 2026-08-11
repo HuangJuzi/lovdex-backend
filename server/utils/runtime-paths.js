@@ -39,3 +39,9 @@ export function findAppRoot(startDir) {
 export function getAppRoot() {
   return findAppRoot(getModuleDir(import.meta.url));
 }
+
+export function getMainAgentWorkspace() {
+  return process.env.LOVDEX_MAIN_WORKSPACE
+    ? path.resolve(process.env.LOVDEX_MAIN_WORKSPACE)
+    : path.dirname(getAppRoot());
+}
