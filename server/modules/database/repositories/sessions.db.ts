@@ -365,6 +365,30 @@ export const sessionsDb = {
     return normalizeSessionRows(rows);
   },
 
+  /**
+   * All operator (Lovdex助手) sessions for one project path, newest first.
+   * Used for the operator workspace project payload: unlike the paginated top-N
+   * used for regular projects, every assistant session must be present so a
+   * direct /session/:id open resolves even for older conversations that would
+   * otherwise fall out of the page limit.
+   */
+  getSessionsByProjectPathOperator(projectPath: string): SessionRow[] {
+    const db = getConnection();
+    const normalizedProjectPath = normalizeProjectPath(projectPath);
+    const rows = db
+      .prepare(
+        `SELECT ${SESSION_ROW_COLUMNS}
+         FROM sessions
+         WHERE project_path = ?
+           AND is_operator = 1
+           AND isArchived = 0
+         ORDER BY datetime(COALESCE(updated_at, created_at)) DESC, session_id DESC`
+      )
+      .all(normalizedProjectPath) as SessionRow[];
+
+    return normalizeSessionRows(rows);
+  },
+
   getSessionsByProjectPath(projectPath: string): SessionRow[] {
     const db = getConnection();
     const normalizedProjectPath = normalizeProjectPath(projectPath);

@@ -231,11 +231,6 @@ export async function getProjectsWithSessions(
         ? row.custom_project_name
         : await generateDisplayName(path.basename(projectPath) || projectPath, projectPath);
 
-    const sessionsPage = readProjectSessionsPageByPath(projectPath, {
-      limit: options.sessionsLimit,
-      offset: options.sessionsOffset,
-    });
-
     const mainAgentRoot = await resolveMainAgentRoot();
     let isMainAgentWorkspace = false;
     if (mainAgentRoot) {
@@ -248,6 +243,25 @@ export async function getProjectsWithSessions(
 
     const isOperatorWorkspace = await isOperatorWorkspacePath(projectPath);
 
+    // The operator workspace payload must include every Lovdex助手 session so
+    // /session/:id resolution works for older conversations too — the paginated
+    // top-N used for regular projects would drop assistant sessions once the
+    // workspace accumulates non-operator (auto-verdict / task) sessions.
+    let sessions: SessionSummary[];
+    let sessionTotal: number;
+    if (isOperatorWorkspace) {
+      const operatorRows = sessionsDb.getSessionsByProjectPathOperator(projectPath) as SessionRepositoryRow[];
+      sessions = operatorRows.map(mapSessionRowToSummary);
+      sessionTotal = operatorRows.length;
+    } else {
+      const sessionsPage = readProjectSessionsPageByPath(projectPath, {
+        limit: options.sessionsLimit,
+        offset: options.sessionsOffset,
+      });
+      sessions = sessionsPage.sessions;
+      sessionTotal = sessionsPage.total;
+    }
+
     projects.push({
       projectId,
       path: projectPath,
@@ -256,10 +270,10 @@ export async function getProjectsWithSessions(
       isStarred: Boolean(row.isStarred),
       isMainAgentWorkspace,
       isOperatorWorkspace,
-      sessions: sessionsPage.sessions,
+      sessions,
       sessionMeta: {
-        hasMore: sessionsPage.hasMore,
-        total: sessionsPage.total,
+        hasMore: false,
+        total: sessionTotal,
       },
     });
   }
