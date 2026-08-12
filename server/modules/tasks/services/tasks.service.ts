@@ -516,7 +516,7 @@ export function createTasksService(
         const name = session.custom_name?.trim();
         if (name && name !== 'Untitled Claude Session' && name !== 'Untitled Codex Session') continue;
         try {
-          opts.deps?.sessionsDb?.updateSessionCustomName(row.session_id, title);
+          opts.deps?.sessionsDb?.updateSessionCustomName(row.session_id, row.title);
           changed += 1;
         } catch (err) {
           // 单行回填失败不中断整轮：跳过该会话，其余继续。幂等，下轮启动可再补。
