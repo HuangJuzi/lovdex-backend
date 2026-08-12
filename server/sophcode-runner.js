@@ -16,6 +16,10 @@
  * - getActiveSophcodeSessions() - List all active sessions
  */
 
+import os from 'node:os';
+import path from 'node:path';
+
+import Database from 'better-sqlite3';
 import { spawn } from 'cross-spawn';
 
 import { appendImagesInputTag, normalizeImageDescriptors } from './shared/image-attachments.js';
@@ -51,6 +55,40 @@ export function resolveSophcodePermissionOptions(permissionMode) {
       return { args: [], env: { OPENCODE_PERMISSION: JSON.stringify({ edit: 'allow' }) } };
     default:
       return { args: [], env: {} };
+  }
+}
+
+/**
+ * Resolves the working directory to hand to a `sophcode run` invocation.
+ *
+ * A session's transcript directory lives in opencode.db (`directory`, with
+ * `path` as the git-relative fallback for older rows). When the caller does not
+ * supply a cwd — which happens after the session synchronizer loses a project
+ * path — resuming with an empty `--dir` makes the CLI look for the session's
+ * worktree in the wrong place and hang. Falling back to the session's own
+ * recorded directory keeps existing sessions resumable without waiting on a
+ * re-sync. Exported for tests.
+ */
+export function resolveSophcodeCwd(providerSessionId, cwd) {
+  const explicitCwd = cwd && String(cwd).trim() ? String(cwd).trim() : '';
+  if (explicitCwd) {
+    return explicitCwd;
+  }
+  if (!providerSessionId) {
+    return process.cwd();
+  }
+  try {
+    const dbPath = path.join(os.homedir(), '.local', 'share', 'opencode', 'opencode.db');
+    const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+    try {
+      const row = db.prepare('SELECT directory, path FROM session WHERE id = ?').get(providerSessionId);
+      const stored = row ? String(row.directory || row.path || '').trim() : '';
+      return stored || process.cwd();
+    } finally {
+      db.close();
+    }
+  } catch {
+    return process.cwd();
   }
 }
 
@@ -152,7 +190,8 @@ export async function querySophcode(command, options = {}, ws) {
   let completeSent = false;
   let terminalFailure = null;
 
-  const args = ['run', '--format', 'json', '--dir', cwd];
+  const resolvedCwd = resolveSophcodeCwd(capturedSessionId || sessionId, cwd);
+  const args = ['run', '--format', 'json', '--dir', resolvedCwd];
   if (capturedSessionId) {
     args.push('--session', capturedSessionId);
   }
@@ -175,7 +214,7 @@ export async function querySophcode(command, options = {}, ws) {
 
   const processKey = capturedSessionId || `new-${Date.now()}`;
   const child = spawn('sophcode', args, {
-    cwd,
+    cwd: resolvedCwd,
     stdio: ['pipe', 'pipe', 'pipe'],
     env: { ...process.env, ...permissionOptions.env },
   });

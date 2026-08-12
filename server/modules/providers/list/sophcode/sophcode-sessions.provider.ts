@@ -85,10 +85,16 @@ export class SophcodeSessionsProvider implements IProviderSessions {
 
   async fetchHistory(sessionId: string, options: FetchHistoryOptions = {}): Promise<FetchHistoryResult> {
     const { limit = null, offset = 0 } = options;
+    // The service resolves the app session row and passes the provider-native
+    // id (opencode's `ses_...`) via options.providerSessionId; the first
+    // argument is the lovdex app session id. opencode.db is keyed by the
+    // provider-native id, so prefer it and only fall back to the app id when
+    // callers (tests, direct use) pass the provider id as the session id.
+    const providerSessionId = options.providerSessionId ?? sessionId;
     try {
       const db = openSophcodeDb();
       try {
-        const rawMessages = loadMessagesForSession(db, sessionId);
+        const rawMessages = loadMessagesForSession(db, providerSessionId);
         const normalized: NormalizedMessage[] = rawMessages.map((raw) =>
           createNormalizedMessage({
             kind: 'text',

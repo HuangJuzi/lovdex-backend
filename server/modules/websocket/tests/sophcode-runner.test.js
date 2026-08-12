@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
-import { parseSophcodeJsonLine, resolveSophcodePermissionOptions } from '@/sophcode-runner.js';
+import Database from 'better-sqlite3';
+
+import { parseSophcodeJsonLine, resolveSophcodeCwd, resolveSophcodePermissionOptions } from '@/sophcode-runner.js';
 
 test('sophcode runner maps permission modes to CLI flags', () => {
   assert.deepEqual(resolveSophcodePermissionOptions('plan'), { args: ['--agent', 'plan'], env: {} });
@@ -53,4 +58,33 @@ test('sophcode runner ignores malformed json lines', () => {
   const state = { textByMessage: new Map(), sessionId: null };
   const events = parseSophcodeJsonLine('not-json', state);
   assert.deepEqual(events, []);
+});
+
+test('sophcode runner resolves cwd from the session directory when cwd is empty', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'sophcode-runner-'));
+  const dataDir = path.join(tempRoot, '.local', 'share', 'opencode');
+  await fs.mkdir(dataDir, { recursive: true });
+  const db = new Database(path.join(dataDir, 'opencode.db'));
+  db.exec(`
+    CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT, path TEXT);
+    INSERT INTO session (id, directory, path) VALUES
+      ('ses_1', '/mnt/b/workdir/gitlab/moltbot', ''),
+      ('ses_2', '/mnt/b/workdir/gitlab/backend', 'apps/api');
+  `);
+  db.close();
+
+  const originalHome = os.homedir;
+  os.homedir = () => tempRoot;
+  try {
+    // Empty cwd falls back to the session's stored directory (repo-root case).
+    assert.equal(resolveSophcodeCwd('ses_1', ''), '/mnt/b/workdir/gitlab/moltbot');
+    // Empty path column still falls back to directory.
+    assert.equal(resolveSophcodeCwd('ses_2', undefined), '/mnt/b/workdir/gitlab/backend');
+    // An explicit non-empty cwd always wins.
+    assert.equal(resolveSophcodeCwd('ses_1', '/explicit'), '/explicit');
+    // No session id: fall back to process.cwd().
+    assert.equal(resolveSophcodeCwd(null, ''), process.cwd());
+  } finally {
+    os.homedir = originalHome;
+  }
 });

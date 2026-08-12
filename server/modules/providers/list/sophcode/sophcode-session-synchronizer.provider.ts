@@ -13,6 +13,7 @@ const PROVIDER = 'sophcode';
 type SophcodeSessionRow = {
   id: string;
   title?: string;
+  directory?: string;
   path?: string;
   time_created?: number;
   time_updated?: number;
@@ -39,11 +40,16 @@ export class SophcodeSessionSynchronizer implements IProviderSessionSynchronizer
 
     try {
       const rows = db.prepare(
-        `SELECT id, title, path, time_created, time_updated FROM session WHERE time_archived IS NULL`,
+        `SELECT id, title, directory, path, time_created, time_updated FROM session WHERE time_archived IS NULL`,
       ).all() as SophcodeSessionRow[];
 
       for (const row of rows) {
-        const projectPath = readOptionalString(row.path) || '';
+        // opencode v0.3.0 stores the real working directory in `directory`;
+        // `path` is the git-relative subpath within the project (empty at the
+        // repo root). Older v1 rows kept the absolute path in `path`, so it
+        // remains the fallback. Preferring `directory` stops the synchronizer
+        // from wiping project_path to '' for repo-root sessions.
+        const projectPath = readOptionalString(row.directory) || readOptionalString(row.path) || '';
         const createdAt = typeof row.time_created === 'number'
           ? new Date(row.time_created).toISOString()
           : undefined;
