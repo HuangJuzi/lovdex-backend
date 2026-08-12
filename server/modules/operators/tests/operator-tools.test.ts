@@ -95,6 +95,48 @@ test('write_task_summary handler rejects invalid verdict', async () => {
   );
 });
 
+test('start_task_execution forwards the injected createSession to tasks.startExecution', async () => {
+  // Regression for "createSession is not a function": buildOperatorTools must
+  // pass the wired deps.createSession through to startExecution. index.js wires
+  // it into initOperatorHeadless; a missing dep (the old wiring) made the
+  // handler call startExecution(taskId, undefined) and crash in the service.
+  let receivedId: string | undefined;
+  let receivedCreateSession: unknown;
+  const createSession = () => 'sess-created';
+  const fakeTasks = {
+    startExecution: (id: string, cs: unknown) => {
+      receivedId = id;
+      receivedCreateSession = cs;
+      return { sessionId: 'sess-created' };
+    },
+  };
+  const tools = buildOperatorTools({ tasks: fakeTasks as never, createSession });
+
+  const out = await tools.start_task_execution.handler({ taskId: 't1' });
+  assert.equal(receivedId, 't1');
+  assert.equal(receivedCreateSession, createSession, 'createSession must be passed through, not undefined');
+  assert.deepEqual(out, { sessionId: 'sess-created' });
+});
+
+test('start_task_execution passes provider/projectPath/isOperator to the injected createSession', async () => {
+  // Mirrors tasks.service.startExecution: createSession(provider, projectPath, isOperator).
+  // Guards that the operator tool set keeps dispatching real session allocation.
+  let receivedArgs: unknown[] = [];
+  const createSession = (...args: unknown[]) => {
+    receivedArgs = args;
+    return 'sess-xyz';
+  };
+  const fakeTasks = {
+    startExecution: (_id: string, cs: (p: string, proj: string, isOp?: boolean) => string) =>
+      cs('claude', '/workspace/proj', true),
+  };
+  const tools = buildOperatorTools({ tasks: fakeTasks as never, createSession });
+
+  const out = await tools.start_task_execution.handler({ taskId: 't1' });
+  assert.equal(out, 'sess-xyz');
+  assert.deepEqual(receivedArgs, ['claude', '/workspace/proj', true]);
+});
+
 test('get_session_transcript returns finalOutput = newest assistant text (offset 0)', async () => {
   const messages = [
     { role: 'user', content: '开头' },

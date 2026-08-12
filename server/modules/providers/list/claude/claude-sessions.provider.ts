@@ -754,7 +754,7 @@ export class ClaudeSessionsProvider implements IProviderSessions {
               toolInput: part.input,
               toolId: part.id,
             }));
-          } else if (part.type === 'thinking' && part.thinking) {
+          } else if (part.type === 'thinking' && typeof part.thinking === 'string') {
             messages.push(createNormalizedMessage({
               id: `${baseId}_${partIndex}`,
               sessionId,

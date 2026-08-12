@@ -327,6 +327,28 @@ function readNumber(value) {
 }
 
 /**
+ * Maps a Claude Code CLI / SDK stream error to a user-facing message. The CLI
+ * is a Bun (JavaScriptCore) binary, so its internal crashes surface as JSC
+ * errors like `undefined is not an object (evaluating 's.thinking.length')` —
+ * a known CLI bug where a `thinking` content block without the `thinking` text
+ * crashes the CLI's token-usage accumulator. Lovdex can't patch the binary, so
+ * we surface the raw message plus a hint that the crash is CLI-internal (not a
+ * Lovdex wiring bug) so the operator can switch model/effort or update claude.
+ */
+function describeSdkError(error) {
+  const raw = error && typeof error.message === 'string' ? error.message : String(error);
+  const jscUndefined = /is not an object \(evaluating '[^']*'\)/.test(raw);
+  const thinkingCrash = /thinking/i.test(raw);
+  if (jscUndefined && thinkingCrash) {
+    return `${raw} — Claude Code CLI 内部在解析 thinking 推理块时崩溃（CLI bug，Lovdex 无法修补）。可尝试降低该模型的 effort 或在 claude 会话里 /model 切换模型以绕过；升级 @anthropic-ai/claude-code 后如仍复现请反馈给 Anthropic。`;
+  }
+  if (jscUndefined) {
+    return `${raw} — Claude Code CLI 内部运行时崩溃（非 Lovdex 错误）。`;
+  }
+  return raw;
+}
+
+/**
  * Extracts token usage from SDK messages.
  * Prefers per-step `message.usage` (Claude message payload), then falls back
  * to result-level usage/modelUsage for compatibility across SDK versions.
@@ -814,7 +836,7 @@ async function queryClaudeSDK(command, options = {}, ws) {
     const installed = await providerAuthService.isProviderInstalled('claude');
     const errorContent = !installed
       ? 'Claude Code is not installed. Please install it first: https://docs.anthropic.com/en/docs/claude-code'
-      : error.message;
+      : describeSdkError(error);
 
     // Send error to WebSocket, then the terminal complete
     ws.send(createNormalizedMessage({ kind: 'error', content: errorContent, sessionId: capturedSessionId || sessionId || null, provider: 'claude' }));

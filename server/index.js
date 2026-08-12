@@ -214,18 +214,28 @@ try {
     console.error('reconcileFailedTasks on startup failed:', err);
 }
 
+// SessionCreator used by both the HTTP tasks router and the operator tool set:
+// allocates a new app-facing session id for a provider+project (+ operator flag).
+// Defined once so start_task_execution and POST /api/tasks/:id/start always get
+// the same closure — a missing createSession makes the operator tool's
+// start_task_execution call `undefined(...)` → "createSession is not a function".
+const createAppSession = (provider, projectPath, isOperator) =>
+    sessionsDb.createAppSession(crypto.randomUUID(), provider, projectPath, isOperator);
+
 // Wire the operator headless run deps: the real tasksService (adapted so the
 // string-typed operator tool inputs are narrowed to TaskStatus at the boundary),
-// projectsDb, and sessionsService. runOperatorHeadless (in claude-sdk.js) uses
-// these to build the closed operator tool set when auto-verdict runs.
+// projectsDb, sessionsService, and createSession. runOperatorHeadless (in
+// claude-sdk.js) uses these to build the closed operator tool set when
+// auto-verdict runs.
 initOperatorHeadless({
     tasks: adaptTasksServiceForOperatorTools(tasksService),
     projects: projectsDb,
     sessions: sessionsService,
+    createSession: createAppSession,
 });
 
 app.use('/api/tasks', authenticateToken, buildTasksRouter(tasksService, {
-    createSession: (provider, projectPath, isOperator) => sessionsDb.createAppSession(crypto.randomUUID(), provider, projectPath, isOperator),
+    createSession: createAppSession,
 }));
 
 // Operator settings API (protected) — read/update operator automation config.
