@@ -31,6 +31,11 @@ test('verifyToken rejects an expired token', () => {
   assert.equal(verifyToken(token), null);
 });
 
+test('verifyToken returns null for non-string input', () => {
+  assert.equal(verifyToken(null as unknown as string), null);
+  assert.equal(verifyToken(undefined as unknown as string), null);
+});
+
 test('extractTokenFromRequest reads Authorization Bearer first', () => {
   const req = { headers: { authorization: 'Bearer abc.def.ghi' }, query: { token: 'query-token' } };
   assert.equal(extractTokenFromRequest(req), 'abc.def.ghi');

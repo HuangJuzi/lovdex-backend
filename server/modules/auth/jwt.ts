@@ -36,6 +36,9 @@ export function signToken(
 }
 
 export function verifyToken(token: string): AuthTokenPayload | null {
+  if (typeof token !== 'string') {
+    return null;
+  }
   const parts = token.split('.');
   if (parts.length !== 3) {
     return null;
