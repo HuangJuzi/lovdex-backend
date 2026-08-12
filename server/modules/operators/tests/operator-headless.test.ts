@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   buildOperatorSdkTools,
   runOperatorHeadless,
+  adaptTasksServiceForOperatorTools,
 } from '@/claude-sdk.js';
 
 /**
@@ -53,6 +54,25 @@ test('buildOperatorSdkTools includes the closed operator tool set', () => {
   for (const forbidden of ['Bash', 'Edit', 'Write', 'Read', 'AskUserQuestion']) {
     assert.ok(!names.includes(forbidden), `${forbidden} leaked into operator tools`);
   }
+});
+
+test('adaptTasksServiceForOperatorTools forwards priority from createTask to the service', () => {
+  let received: { priority?: string } = {};
+  const fakeSvc = {
+    createTask: (i: unknown) => {
+      received = i as typeof received;
+      return { task_id: 't1' };
+    },
+    listTasks: () => [],
+    getTask: () => null,
+    writeSummary: () => ({}),
+    startExecution: () => ({}),
+    updateTask: () => ({}),
+    moveTask: () => ({}),
+  };
+  const adapted = adaptTasksServiceForOperatorTools(fakeSvc);
+  adapted.createTask({ projectPath: '/p', title: 't', priority: 'P1' });
+  assert.equal(received.priority, 'P1', 'priority must reach the real service, not be dropped by the adapter');
 });
 
 test('runOperatorHeadless calls query with prompt containing sessionId/taskId/title', async () => {

@@ -1,4 +1,4 @@
-import { isAiVerdict, type AiVerdict } from '@/shared/task-status.js';
+import { isAiVerdict, type AiVerdict, isTaskPriority, type TaskPriority } from '@/shared/task-status.js';
 import type { TaskEngine } from '@/shared/types.js';
 
 /**
@@ -28,6 +28,7 @@ export type OperatorToolDeps = {
       title: string;
       description?: string | null;
       status?: string;
+      priority?: TaskPriority;
     }) => unknown;
     listTasks: (f: { projectPath?: string; status?: string }) => unknown[];
     getTask: (id: string) => unknown;
@@ -197,6 +198,11 @@ export function buildOperatorTools(deps: OperatorToolDeps) {
           title: { type: 'string' },
           description: { type: 'string' },
           status: { type: 'string' },
+          priority: {
+            type: 'string',
+            enum: ['P0', 'P1', 'P2', 'P3'],
+            description: 'Task priority (P0 highest). Defaults to P2 when omitted.',
+          },
         },
         required: ['title'],
       },
@@ -205,13 +211,19 @@ export function buildOperatorTools(deps: OperatorToolDeps) {
         title: string;
         description?: string;
         status?: string;
-      }) =>
-        deps.tasks.createTask({
+        priority?: TaskPriority;
+      }) => {
+        if (i.priority !== undefined && !isTaskPriority(i.priority)) {
+          throw new Error(`invalid priority: ${String(i.priority)}`);
+        }
+        return deps.tasks.createTask({
           projectPath: i.projectPath ?? deps.contextProjectPath ?? '',
           title: i.title,
           description: i.description ?? null,
           status: i.status ?? 'todo',
-        }),
+          priority: i.priority,
+        });
+      },
     },
     start_task_execution: {
       description: 'Dispatch a task: create its session and start the run',
@@ -225,7 +237,7 @@ export function buildOperatorTools(deps: OperatorToolDeps) {
     },
     update_task: {
       description:
-        'Update task fields. Use move_task for status changes; update_task is for title/description/executor.',
+        'Update task fields. Use move_task for status changes; update_task is for title/description/executor/priority.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -234,6 +246,11 @@ export function buildOperatorTools(deps: OperatorToolDeps) {
           description: { type: 'string' },
           executorProvider: { type: 'string' },
           executorModel: { type: 'string' },
+          priority: {
+            type: 'string',
+            enum: ['P0', 'P1', 'P2', 'P3'],
+            description: 'Task priority (P0 highest).',
+          },
         },
         required: ['taskId'],
       },
@@ -243,7 +260,11 @@ export function buildOperatorTools(deps: OperatorToolDeps) {
         description?: string;
         executorProvider?: string;
         executorModel?: string;
+        priority?: TaskPriority;
       }) => {
+        if (i.priority !== undefined && !isTaskPriority(i.priority)) {
+          throw new Error(`invalid priority: ${String(i.priority)}`);
+        }
         const { taskId, ...rest } = i;
         return deps.tasks.updateTask(taskId, rest);
       },

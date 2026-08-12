@@ -21,6 +21,64 @@ test('create_task handler defaults status to todo + uses contextProjectPath', as
   assert.equal(received.projectPath, '/explicit');
 });
 
+test('create_task handler forwards priority to the tasks service', async () => {
+  let received: { priority?: string } = {};
+  const fakeTasks = {
+    createTask: (i: unknown) => {
+      received = i as typeof received;
+      return { task_id: 't1', status: 'todo' };
+    },
+  };
+  const tools = buildOperatorTools({ tasks: fakeTasks as never, contextProjectPath: '/ctx' });
+
+  // explicit priority is forwarded verbatim
+  await tools.create_task.handler({ title: 'urgent', priority: 'P1' });
+  assert.equal(received.priority, 'P1');
+
+  // omitted priority is not injected — the service applies its own P2 default
+  await tools.create_task.handler({ title: 'plain' });
+  assert.equal(received.priority, undefined);
+});
+
+test('create_task handler rejects an invalid priority', async () => {
+  const fakeTasks = { createTask: () => ({ task_id: 't1' }) };
+  const tools = buildOperatorTools({ tasks: fakeTasks as never });
+  // The model can send any string; cast simulates an out-of-enum value at runtime.
+  await assert.rejects(
+    () => tools.create_task.handler({ title: 'x', priority: 'P9' as never }),
+    /invalid priority/,
+  );
+});
+
+test('update_task handler forwards priority to the tasks service', async () => {
+  let received: Record<string, unknown> = {};
+  const fakeTasks = {
+    updateTask: (id: string, u: unknown) => {
+      received = { id, ...(u as object) };
+      return { task_id: id };
+    },
+  };
+  const tools = buildOperatorTools({ tasks: fakeTasks as never });
+
+  await tools.update_task.handler({ taskId: 't1', priority: 'P0' });
+  assert.equal(received.id, 't1');
+  assert.equal(received.priority, 'P0');
+
+  // title + priority can be updated together
+  await tools.update_task.handler({ taskId: 't2', title: 'renamed', priority: 'P3' });
+  assert.equal(received.title, 'renamed');
+  assert.equal(received.priority, 'P3');
+});
+
+test('update_task handler rejects an invalid priority', async () => {
+  const fakeTasks = { updateTask: () => ({ task_id: 't1' }) };
+  const tools = buildOperatorTools({ tasks: fakeTasks as never });
+  await assert.rejects(
+    () => tools.update_task.handler({ taskId: 't1', priority: 'PX' as never }),
+    /invalid priority/,
+  );
+});
+
 test('write_task_summary handler delegates to service', async () => {
   let called = false;
   const fakeTasks = { writeSummary: () => { called = true; return { verdict: 'done' }; } };

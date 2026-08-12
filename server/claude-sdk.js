@@ -968,6 +968,7 @@ export function adaptTasksServiceForOperatorTools(svc) {
         title: i.title,
         description: i.description,
         status: i.status,
+        priority: i.priority,
       });
     },
     listTasks: (f) => {
