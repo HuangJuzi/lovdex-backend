@@ -1141,13 +1141,20 @@ export async function runOperatorHeadless({ sessionId, taskId, title, promptOver
   const prompt = promptOverride ?? cfg.verdict_prompt_override ??
     `你是 Lovdex Operator。判断任务 ${taskId}（${title}）在 session ${sessionId} 里的实际完成度。
 ${priorVerdictContext}
-判定以 get_session_transcript 返回的 finalOutput（最终输出，即最后一条 assistant 消息）为第一依据，再参考整段 transcript 佐证：
-- 最终输出在向用户提问、请求确认或让用户选择下一步（例如「要我提交并推送吗？」「还需要我做什么吗？」）→ verdict = needs_review（待你决策）
-- 最终输出明确表示全部完成、产出已落地、无待用户决策事项 → verdict = done
-- 最终输出只给了计划/方案、没有实际改动 → verdict = only_plan
-- 最终输出表示卡住、需要用户介入才能继续 → verdict = blocked
+先读 get_session_transcript 返回的 finalOutput（最终输出，即最后一条 assistant 消息），再参考整段 transcript 佐证。判定要同时权衡三方面，不要只看结尾措辞：
+1. 实际产出质量：是否定位了根因、做了真实改动、交付物已落地（而非只给计划）。
+2. 验证结果：单测/E2E/构建等是否通过（看 finalOutput 与 transcript 里明确给出的验证结论）。
+3. 是否真正收尾：剩余事项的性质——是 Agent 按惯例应自行完成的例行收尾（提交、推送、合入 main、重启、部署），还是必须用户亲自决策的事项（选方案、确认业务方向、授权外部操作）。
 
-调 write_task_summary 写入：summary（中文≤3句）、verdict（done|only_plan|needs_review|blocked）、reason（一句，说明判定依据）。`;
+判定规则（按优先级）：
+- 实际改动已落地 + 验证通过 + 仅差例行收尾（提交/推送/合入/部署，或最终输出礼貌性地问「要我提交并推送吗？」「还需要我做什么吗？」等）→ verdict = done。按 Lovdex 用户偏好，提交推送合入 main 是 Agent 的例行职责，不算用户决策门；这类礼貌性提问不否定完成度。
+- 实际改动已落地 + 验证通过 + 剩余事项确实需要用户决策（非例行收尾）→ verdict = needs_review（待你决策）。
+- 只给了计划/方案、没有实际改动 → verdict = only_plan。
+- 产出错误、验证失败、卡死或必须用户介入才能继续 → verdict = blocked。
+
+注意：仅凭最终输出以问句结尾不足以判 needs_review/blocked——若工作实质完成且验证通过，礼貌性收尾提问应判 done。
+
+调 write_task_summary 写入：summary（中文≤3句）、verdict（done|only_plan|needs_review|blocked）、reason（一句，说明判定依据，含验证结论与剩余事项性质）。`;
 
   try {
     const sdkTools = buildOperatorSdkTools(resolvedDeps);
@@ -1179,7 +1186,7 @@ ${priorVerdictContext}
       // SDK's cache_control-on-middle-block bug that the preset path triggers
       // when combined with a user prompt (API 400 "Extra inputs are not
       // permitted, cache_control").
-      systemPrompt: '你是 Lovdex Operator，一个负责评估任务完成度的助手。你只能调用 lovdex-operator 工具集（list_tasks/get_task/get_session_transcript/write_task_summary 等）。不要试图编辑代码或运行 shell——这些工具不可用。判定完成度时以 get_session_transcript 的 finalOutput（最终输出，即最后一条 assistant 消息）为第一依据：若它在向用户提问、请求确认或等待用户决策，verdict=needs_review，无论之前做了多少工作；仅当最终输出明确表示全部完成且无待用户决策事项时才判 done。但注意：如果该任务此前已被判定完成（用户 prompt 中会给出现成判定记录），而本次会话末尾的追加工作与主任务无关（例如用户继续聊别的事），应保持 done，不要因追加工作的最终输出把已完成的旧任务降级为 needs_review/blocked——仅当追加工作明确表明主任务交付物仍未完成或被破坏时才降级。',
+      systemPrompt: '你是 Lovdex Operator，一个负责评估任务完成度的助手。你只能调用 lovdex-operator 工具集（list_tasks/get_task/get_session_transcript/write_task_summary 等）。不要试图编辑代码或运行 shell——这些工具不可用。判定完成度时以 get_session_transcript 的 finalOutput（最终输出，即最后一条 assistant 消息）为第一依据，并参考整段 transcript 佐证，同时权衡三方面：实际产出质量（根因定位/真实改动/交付物落地）、验证结果（单测/E2E/构建是否通过）、是否真正收尾（剩余事项是 Agent 例行收尾如提交推送合入部署，还是必须用户决策）。按 Lovdex 用户偏好，提交推送合入 main 是 Agent 的例行职责，不算用户决策门。判定规则：实际改动已落地+验证通过+仅差例行收尾（含礼貌性问「要我提交并推送吗？」「还需要我做什么吗？」）→ done；实际改动已落地+验证通过+剩余事项确需用户决策 → needs_review；只给计划无改动 → only_plan；产出错误/验证失败/卡死/需用户介入 → blocked。仅凭最终输出以问句结尾不足以判 needs_review/blocked——工作实质完成且验证通过时，礼貌性收尾提问应判 done。但注意：如果该任务此前已被判定完成（用户 prompt 中会给出现成判定记录），而本次会话末尾的追加工作与主任务无关（例如用户继续聊别的事），应保持 done，不要因追加工作的最终输出把已完成的旧任务降级为 needs_review/blocked——仅当追加工作明确表明主任务交付物仍未完成或被破坏时才降级。',
       settingSources: ['project', 'user', 'local'],
     };
 

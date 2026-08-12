@@ -135,7 +135,7 @@ test('runOperatorHeadless calls query with prompt containing sessionId/taskId/ti
   assert.ok(!('ws' in options) && !('writer' in options), 'ws/writer leaked into headless options');
 });
 
-test('default verdict prompt + systemPrompt anchor on final output and map open questions to needs_review', async () => {
+test('default verdict prompt + systemPrompt anchor on final output and weigh quality+verification+finish', async () => {
   let captured: { prompt?: unknown; options?: Record<string, unknown> } = {};
   const queryFn = (params: { prompt: unknown; options: Record<string, unknown> }) => {
     captured = params;
@@ -162,16 +162,94 @@ test('default verdict prompt + systemPrompt anchor on final output and map open 
   const prompt = String(captured.prompt);
   // final output is the decisive signal
   assert.ok(prompt.includes('finalOutput'), 'prompt should name finalOutput as the first-class signal');
-  // an open question / awaiting user decision must map to needs_review
+  // the verdict must weigh actual quality + verification + finish, not just the trailing wording
+  assert.ok(/实际产出质量|验证结果|是否真正收尾/.test(prompt), 'prompt should weigh quality+verification+finish, not just trailing wording');
+  // needs_review stays available for genuine user-decision pending
   assert.ok(prompt.includes('needs_review'), 'prompt should mention needs_review verdict');
-  assert.ok(/提问|确认|决策/.test(prompt), 'prompt should classify pending questions as awaiting decision');
-  // done is reserved for explicit full completion with nothing pending
+  assert.ok(/提问|确认|决策/.test(prompt), 'prompt should still reference pending questions / decisions');
+  // done is reachable when work is substantively complete
   assert.ok(prompt.includes('done'), 'prompt should still describe the done condition');
 
   const options = captured.options!;
   const sys = String(options.systemPrompt ?? '');
   assert.ok(sys.includes('finalOutput'), 'systemPrompt should anchor on finalOutput');
   assert.ok(sys.includes('needs_review'), 'systemPrompt should mention needs_review');
+});
+
+test('default verdict prompt treats verified work with only a routine commit/push tail as done, not failed/blocked', async () => {
+  // Regression: case 49e08eb1 — root cause located, fix landed, unit + E2E all
+  // green, only the commit/push remained, and the agent ended with a polite
+  // "要我提交并推送吗？". The old prompt forced needs_review/blocked on any
+  // trailing question regardless of work done. The new prompt must instruct
+  // that a routine commit/push tail (the agent's expected duty per Lovdex
+  // user preference) does NOT block done.
+  let captured: { prompt?: unknown; options?: Record<string, unknown> } = {};
+  const queryFn = (params: { prompt: unknown; options: Record<string, unknown> }) => {
+    captured = params;
+    return emptyIterable();
+  };
+
+  await runOperatorHeadless({
+    sessionId: 'sess-123',
+    taskId: 'task-456',
+    title: 'Fix Lovdex 助手新建 session BUG',
+    queryFn: queryFn as never,
+    deps: fakeDeps() as never,
+    config: {
+      enabled: true,
+      auto_verdict_enabled: true,
+      model: '',
+      workspace: '/tmp/op',
+      max_concurrent: 1,
+      verdict_prompt_override: null,
+      interactive_chat_enabled: true,
+    },
+  });
+
+  const prompt = String(captured.prompt);
+  // routine commit/push/merge is the agent's duty, not a user-decision gate
+  assert.ok(/提交|推送|合入/.test(prompt), 'prompt should reference routine commit/push/merge tail');
+  assert.ok(/例行|Agent.*职责|不算用户决策门/.test(prompt), 'prompt should mark routine commit/push as the agent duty, not a user gate');
+  // a trailing question alone must NOT force needs_review/blocked when work is done + verified
+  assert.ok(/问句结尾不足以判|礼貌性收尾提问应判 done|不否定完成度/.test(prompt), 'prompt should state a trailing question does not block done');
+  // verification signal must be part of the decision
+  assert.ok(/验证通过|验证结果|单测|E2E|构建/.test(prompt), 'prompt should reference verification outcome as a decision input');
+
+  const options = captured.options!;
+  const sys = String(options.systemPrompt ?? '');
+  assert.ok(/问句结尾不足以判|礼貌性收尾提问应判 done/.test(sys), 'systemPrompt should also state trailing question does not block done');
+});
+
+test('default verdict prompt reserves needs_review for genuine user-decision pending, not routine commit tail', async () => {
+  // needs_review must survive for real user decisions (choosing an approach,
+  // business direction, authorizing an external op) — distinct from a routine
+  // commit/push tail that maps to done.
+  let captured: { prompt?: unknown; options?: Record<string, unknown> } = {};
+  const queryFn = (params: { prompt: unknown; options: Record<string, unknown> }) => {
+    captured = params;
+    return emptyIterable();
+  };
+
+  await runOperatorHeadless({
+    sessionId: 'sess-123',
+    taskId: 'task-456',
+    title: 'Pick a deployment strategy',
+    queryFn: queryFn as never,
+    deps: fakeDeps() as never,
+    config: {
+      enabled: true,
+      auto_verdict_enabled: true,
+      model: '',
+      workspace: '/tmp/op',
+      max_concurrent: 1,
+      verdict_prompt_override: null,
+      interactive_chat_enabled: true,
+    },
+  });
+
+  const prompt = String(captured.prompt);
+  assert.ok(prompt.includes('needs_review'), 'prompt should still describe needs_review for genuine user decisions');
+  assert.ok(/选方案|业务方向|授权|必须用户.*决策/.test(prompt), 'prompt should describe genuine user-decision cases for needs_review');
 });
 
 test('runOperatorHeadless injects prior-verdict context when the task was already judged', async () => {
