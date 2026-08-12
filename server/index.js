@@ -214,6 +214,17 @@ try {
     console.error('reconcileFailedTasks on startup failed:', err);
 }
 
+// On startup, backfill task execution sessions that have no name with the
+// linked task's title, so the sidebar shows which task each session belongs to.
+try {
+    const backfilled = tasksService.backfillSessionNames();
+    if (backfilled > 0) {
+        console.log(`[tasks] backfilled ${backfilled} session name(s) from task titles`);
+    }
+} catch (err) {
+    console.error('backfillSessionNames on startup failed:', err);
+}
+
 // SessionCreator used by both the HTTP tasks router and the operator tool set:
 // allocates a new app-facing session id for a provider+project (+ operator flag).
 // Defined once so start_task_execution and POST /api/tasks/:id/start always get

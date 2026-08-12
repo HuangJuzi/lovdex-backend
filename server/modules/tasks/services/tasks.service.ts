@@ -500,6 +500,26 @@ export function createTasksService(
       }
       return changed;
     },
+
+    /**
+     * 回填：把带会话且会话名空白/占位符的任务，会话 custom_name 设为任务标题。
+     * 幂等——只填空白/占位符名，不覆盖用户手动重命名或 AI 已有标题。启动时调用。
+     * 返回回填的会话数。
+     */
+    backfillSessionNames(): number {
+      let changed = 0;
+      for (const row of resolveDb.listTasks({})) {
+        const title = row.title?.trim();
+        if (!title || !row.session_id) continue;
+        const session = resolveSession(row.session_id);
+        if (!session) continue;
+        const name = session.custom_name?.trim();
+        if (name && name !== 'Untitled Claude Session' && name !== 'Untitled Codex Session') continue;
+        opts.deps?.sessionsDb?.updateSessionCustomName(row.session_id, row.title);
+        changed += 1;
+      }
+      return changed;
+    },
   };
 }
 

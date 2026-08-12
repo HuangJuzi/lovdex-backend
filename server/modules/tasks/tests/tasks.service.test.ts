@@ -529,3 +529,81 @@ test('startExecution skips naming when the task title is blank', () => {
   svc.startExecution('t1', () => 's1');
   assert.deepEqual(named, []);
 });
+
+type BackfillSessionRow = { custom_name?: string | null; project_path?: string | null };
+
+function makeBackfillSessionStub(
+  rows: Record<string, BackfillSessionRow>,
+  updated: { sessionId: string; customName: string }[],
+) {
+  return {
+    getSessionById: (sid: string) =>
+      rows[sid]
+        ? { session_id: sid, custom_name: rows[sid].custom_name ?? null, project_path: rows[sid].project_path ?? null }
+        : null,
+    updateSessionCustomName: (sessionId: string, customName: string) => {
+      updated.push({ sessionId, customName });
+    },
+  } as unknown as typeof import('@/modules/database/index.js').sessionsDb;
+}
+
+test('backfillSessionNames fills a blank session name from the task title', () => {
+  const { db } = makeDbStub();
+  db.linkSession('t1', 's1');
+  const updated: { sessionId: string; customName: string }[] = [];
+  const sessions = makeBackfillSessionStub({ s1: { custom_name: null } }, updated);
+  const svc = createTasksService(db, { broadcast: () => {}, deps: { sessionsDb: sessions } });
+  assert.equal(svc.backfillSessionNames(), 1);
+  assert.deepEqual(updated, [{ sessionId: 's1', customName: 'x' }]);
+});
+
+test('backfillSessionNames skips a session that already has a custom name', () => {
+  const { db } = makeDbStub();
+  db.linkSession('t1', 's1');
+  const updated: { sessionId: string; customName: string }[] = [];
+  const sessions = makeBackfillSessionStub({ s1: { custom_name: '自定义' } }, updated);
+  const svc = createTasksService(db, { broadcast: () => {}, deps: { sessionsDb: sessions } });
+  assert.equal(svc.backfillSessionNames(), 0);
+  assert.deepEqual(updated, []);
+});
+
+test('backfillSessionNames replaces a placeholder session name', () => {
+  const { db } = makeDbStub();
+  db.linkSession('t1', 's1');
+  const updated: { sessionId: string; customName: string }[] = [];
+  const sessions = makeBackfillSessionStub({ s1: { custom_name: 'Untitled Claude Session' } }, updated);
+  const svc = createTasksService(db, { broadcast: () => {}, deps: { sessionsDb: sessions } });
+  assert.equal(svc.backfillSessionNames(), 1);
+  assert.deepEqual(updated, [{ sessionId: 's1', customName: 'x' }]);
+});
+
+test('backfillSessionNames skips a task without a linked session', () => {
+  const { db } = makeDbStub(); // t1 默认 session_id 为 null
+  const updated: { sessionId: string; customName: string }[] = [];
+  const sessions = makeBackfillSessionStub({}, updated);
+  const svc = createTasksService(db, { broadcast: () => {}, deps: { sessionsDb: sessions } });
+  assert.equal(svc.backfillSessionNames(), 0);
+  assert.deepEqual(updated, []);
+});
+
+test('backfillSessionNames skips a task with a blank title', () => {
+  const stubDb = {
+    ...makeDbStub().db,
+    listTasks: () => [{ task_id: 't1', session_id: 's1', title: '   ' }],
+  };
+  const updated: { sessionId: string; customName: string }[] = [];
+  const sessions = makeBackfillSessionStub({ s1: { custom_name: null } }, updated);
+  const svc = createTasksService(stubDb as unknown as TaskDbLike, { broadcast: () => {}, deps: { sessionsDb: sessions } });
+  assert.equal(svc.backfillSessionNames(), 0);
+  assert.deepEqual(updated, []);
+});
+
+test('backfillSessionNames skips a task whose session is missing', () => {
+  const { db } = makeDbStub();
+  db.linkSession('t1', 'ghost');
+  const updated: { sessionId: string; customName: string }[] = [];
+  const sessions = makeBackfillSessionStub({}, updated); // getSessionById('ghost') → null
+  const svc = createTasksService(db, { broadcast: () => {}, deps: { sessionsDb: sessions } });
+  assert.equal(svc.backfillSessionNames(), 0);
+  assert.deepEqual(updated, []);
+});
