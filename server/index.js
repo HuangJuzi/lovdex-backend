@@ -40,6 +40,7 @@ import commandsRoutes from './routes/commands.js';
 import sessionsRoutes from './routes/sessions.js';
 import projectModuleRoutes from './modules/projects/projects.routes.js';
 import userRoutes from './routes/user.js';
+import authRoutes from './modules/auth/auth.routes.js';
 import providerRoutes from './modules/providers/provider.routes.js';
 import { assetsRoutes } from './modules/assets/index.js';
 import { initializeDatabase, projectsDb, sessionsDb, tasksDb } from './modules/database/index.js';
@@ -157,6 +158,10 @@ app.get('/health', (req, res) => {
 
 // Optional API key validation (if configured)
 app.use('/api', validateApiKey);
+
+// Auth routes (public login + token validation). Mounted under /api so the
+// API-key check above still applies; login/me themselves require no token.
+app.use('/api/auth', authRoutes);
 
 // Projects API Routes
 app.use('/api/projects', authenticateToken, projectModuleRoutes);
