@@ -1027,9 +1027,24 @@ function jsonSchemaToZodRawShape(inputSchema) {
   const shape = {};
   for (const [key, def] of Object.entries(props)) {
     const isRequired = required.has(key);
-    // buildOperatorTools declares string and number properties; treat unknown
-    // types as string to stay permissive rather than rejecting.
-    const base = def && def.type === 'number' ? z.number() : z.string();
+    // buildOperatorTools declares string and number properties. String props may
+    // carry an enum (e.g. priority: P0/P1/P2/P3) — preserve it so the SDK schema
+    // tells the model the exact allowed values instead of an unconstrained
+    // string, and keep descriptions so the model sees why a param matters.
+    let base;
+    if (def && def.type === 'number') {
+      base = z.number();
+    } else if (
+      def && Array.isArray(def.enum) && def.enum.length > 0
+      && def.enum.every((e) => typeof e === 'string')
+    ) {
+      base = z.enum(def.enum);
+    } else {
+      base = z.string();
+    }
+    if (def && typeof def.description === 'string' && def.description) {
+      base = base.describe(def.description);
+    }
     shape[key] = isRequired ? base : base.optional();
   }
   return shape;

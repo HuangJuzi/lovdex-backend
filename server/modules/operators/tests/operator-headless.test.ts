@@ -75,6 +75,27 @@ test('adaptTasksServiceForOperatorTools forwards priority from createTask to the
   assert.equal(received.priority, 'P1', 'priority must reach the real service, not be dropped by the adapter');
 });
 
+test('SDK input schema surfaces priority as a P0-P3 enum, not a bare string', () => {
+  // Regression: buildOperatorTools declares priority with an enum, but
+  // jsonSchemaToZodRawShape used to drop it — the model saw `priority?: string`
+  // with no hint of valid values, so it guessed "high"/numbers and got rejected
+  // only at the handler. The SDK schema must carry the exact allowed values so
+  // the model can pick a valid priority up front.
+  const tools = buildOperatorSdkTools(fakeDeps() as never);
+  const createTask = tools.find((t: { name: string }) => t.name === 'create_task');
+  assert.ok(createTask, 'create_task tool missing');
+  const priority = (createTask as { inputSchema: Record<string, { safeParse: (v: unknown) => { success: boolean } }> }).inputSchema.priority;
+  assert.ok(priority, 'create_task SDK inputSchema must declare priority');
+
+  for (const valid of ['P0', 'P1', 'P2', 'P3']) {
+    assert.equal(priority.safeParse(valid).success, true, `priority ${valid} must be accepted by the schema`);
+  }
+  assert.equal(priority.safeParse(undefined).success, true, 'priority must stay optional');
+  assert.equal(priority.safeParse('P9').success, false, 'out-of-enum priority must be rejected by the schema');
+  assert.equal(priority.safeParse(1).success, false, 'numeric priority must be rejected by the schema');
+  assert.equal(priority.safeParse('high').success, false, 'free-text priority must be rejected by the schema');
+});
+
 test('runOperatorHeadless calls query with prompt containing sessionId/taskId/title', async () => {
   let captured: { prompt?: unknown; options?: Record<string, unknown> } = {};
   const queryFn = (params: { prompt: unknown; options: Record<string, unknown> }) => {

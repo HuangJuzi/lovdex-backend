@@ -79,6 +79,19 @@ test('update_task handler rejects an invalid priority', async () => {
   );
 });
 
+test('create_task/update_task input schema declares priority as P0-P3 enum', () => {
+  const tools = buildOperatorTools({ tasks: {} as never });
+  for (const name of ['create_task', 'update_task']) {
+    const props = tools[name].inputSchema.properties as Record<string, { type?: string; enum?: string[]; description?: string }>;
+    const priority = props.priority;
+    assert.ok(priority, `${name} inputSchema must declare priority`);
+    assert.equal(priority.type, 'string');
+    assert.deepEqual(priority.enum, ['P0', 'P1', 'P2', 'P3']);
+    assert.ok(typeof priority.description === 'string' && priority.description.length > 0,
+      `${name} priority must carry a description so the model knows the valid values`);
+  }
+});
+
 test('write_task_summary handler delegates to service', async () => {
   let called = false;
   const fakeTasks = { writeSummary: () => { called = true; return { verdict: 'done' }; } };
