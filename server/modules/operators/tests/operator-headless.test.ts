@@ -133,6 +133,44 @@ test('default verdict prompt + systemPrompt anchor on final output and map open 
   assert.ok(sys.includes('needs_review'), 'systemPrompt should mention needs_review');
 });
 
+test('runOperatorHeadless injects prior-verdict context when the task was already judged', async () => {
+  let captured: { prompt?: unknown; options?: Record<string, unknown> } = {};
+  const queryFn = (params: { prompt: unknown; options: Record<string, unknown> }) => {
+    captured = params;
+    return emptyIterable();
+  };
+
+  const deps = {
+    ...fakeDeps(),
+    tasks: {
+      ...fakeTasks(),
+      // The task already carries an AI verdict from an earlier run (survives reopen).
+      getTask: () => ({ task_id: 'task-456', ai_summary: '已完成登录', verdict_at: '2026-08-12T00:00:00Z' }),
+    },
+  };
+
+  await runOperatorHeadless({
+    sessionId: 'sess-123',
+    taskId: 'task-456',
+    title: 'Implement login',
+    queryFn: queryFn as never,
+    deps: deps as never,
+    config: {
+      enabled: true,
+      auto_verdict_enabled: true,
+      model: '',
+      workspace: '/tmp/op',
+      max_concurrent: 1,
+      verdict_prompt_override: null,
+      interactive_chat_enabled: true,
+    },
+  });
+
+  const prompt = String(captured.prompt);
+  assert.ok(prompt.includes('此前已被 AI 判定'), `prompt should mention the prior verdict: ${prompt}`);
+  assert.ok(prompt.includes('保持 done'), 'prompt should instruct keeping done for unrelated follow-up');
+});
+
 test('runOperatorHeadless swallows query failures (logs, does not throw)', async () => {
   const throwingQuery = () => {
     return (async function* () {

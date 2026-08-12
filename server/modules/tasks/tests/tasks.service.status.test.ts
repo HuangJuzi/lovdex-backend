@@ -180,7 +180,7 @@ test('applyStatusChange to the same status does not clear sub_status', async () 
   });
 });
 
-test('reopened done task goes back to in_progress and skips the auto-verdict on completion', async () => {
+test('reopened done task goes back to in_progress and still triggers the auto-verdict on completion', async () => {
   await withIsolatedDatabase(() => {
     const id = seedTask();
     const completedCalls: Array<[string, string]> = [];
@@ -188,7 +188,7 @@ test('reopened done task goes back to in_progress and skips the auto-verdict on 
       broadcast: () => {},
       onTaskCompleted: (tid, title) => { completedCalls.push([tid, title]); },
     });
-    // 正常跑到 done（第一次完成会触发 onTaskCompleted）
+    // 正常跑到 done（第一次完成触发 onTaskCompleted）
     svc.onSessionStatus('s1', 'running');
     svc.onSessionStatus('s1', 'completed');
     assert.equal(completedCalls.length, 1);
@@ -198,14 +198,11 @@ test('reopened done task goes back to in_progress and skips the auto-verdict on 
     // 用户在已完成任务的会话里继续做其他事 → 回到进行中
     svc.onSessionStatus('s1', 'running');
     assert.equal(svc.getTask(id)?.status, 'in_progress');
-    // 完成时不再触发自动 verdict（避免把与主任务无关的后续工作判为失败）
+    // 完成时【必须】再次触发自动 verdict
     svc.onSessionStatus('s1', 'completed');
-    assert.equal(completedCalls.length, 1); // 没有新增调用
+    assert.equal(completedCalls.length, 2);
     const row = svc.getTask(id);
     assert.equal(row?.status, 'in_review');
-    // 落到评审列等待用户决定（派生徽标 pending_acceptance），而非失败/阻塞
-    assert.equal(row?.sub_status, 'pending_acceptance');
-    assert.equal(tasksDb.getTask(id)?.sub_status, null); // 持久化层面无判定
   });
 });
 
