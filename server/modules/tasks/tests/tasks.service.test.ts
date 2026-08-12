@@ -487,3 +487,45 @@ test('startExecution passes isOperator to createSession', () => {
   });
   assert.equal(captured[0], true);
 });
+
+test('startExecution names the new session after the task title', () => {
+  const { db } = makeDbStub();
+  const named: { sessionId: string; customName: string }[] = [];
+  const sessions = {
+    updateSessionCustomName: (sessionId: string, customName: string) => {
+      named.push({ sessionId, customName });
+    },
+  } as unknown as typeof import('@/modules/database/index.js').sessionsDb;
+  const svc = createTasksService(db, {
+    broadcast: () => {},
+    deps: { sessionsDb: sessions },
+  });
+  const result = svc.startExecution('t1', () => 's1');
+  assert.deepEqual(result, { sessionId: 's1' });
+  assert.deepEqual(named, [{ sessionId: 's1', customName: 'x' }]);
+});
+
+test('startExecution skips naming when the task title is blank', () => {
+  const stubDb = {
+    ...makeDbStub().db,
+    getTask: () => ({
+      task_id: 't1',
+      is_operator: 0,
+      executor_provider: 'claude',
+      project_path: '/p',
+      title: '   ',
+    }),
+  };
+  const named: { sessionId: string; customName: string }[] = [];
+  const sessions = {
+    updateSessionCustomName: (sessionId: string, customName: string) => {
+      named.push({ sessionId, customName });
+    },
+  } as unknown as typeof import('@/modules/database/index.js').sessionsDb;
+  const svc = createTasksService(stubDb as unknown as TaskDbLike, {
+    broadcast: () => {},
+    deps: { sessionsDb: sessions },
+  });
+  svc.startExecution('t1', () => 's1');
+  assert.deepEqual(named, []);
+});

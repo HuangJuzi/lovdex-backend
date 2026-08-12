@@ -369,6 +369,11 @@ export function createTasksService(
       const row = resolveDb.getTask(taskId);
       if (!row) return null;
       const sessionId = createSession(row.executor_provider, row.project_path, Boolean(row.is_operator));
+      // 用任务标题给新执行会话命名，侧边栏一眼看出这个会话属于哪个任务。
+      // 新 app 会话 custom_name 为 NULL；claude/codex 同步器会保留非占位符的 custom_name。
+      if (row.title?.trim()) {
+        opts.deps?.sessionsDb?.updateSessionCustomName(sessionId, row.title);
+      }
       resolveDb.linkSession(taskId, sessionId);
       const updated = resolveDb.getTask(taskId) ?? row;
       emit({ kind: 'task_upserted', task: updated, actor: 'user' });
