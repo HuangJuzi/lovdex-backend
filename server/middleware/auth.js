@@ -1,14 +1,13 @@
-// Internal-only build: authentication is disabled. All routes and the
-// WebSocket gateway are open. A single synthetic local user is attached to
-// `req.user` so route handlers that read `req.user.id` keep working without
-// a real users table row.
+// OSS self-hosted build: authentication is enforced by default. Requests must
+// carry a JWT issued by POST /api/auth/login — as `Authorization: Bearer`, or
+// `?token=` for EventSource/SSE which cannot set headers. Set AUTH_ENABLED=false
+// to restore the open internal-only mode (every request is a synthetic local
+// user). Platform mode keeps its own auth flow and is exempt.
 
-import { appConfigDb } from '../modules/database/index.js';
+import { authConfig, isAuthEnabled } from '@/modules/auth/auth.config.js';
+import { extractTokenFromRequest, signToken, verifyToken } from '@/modules/auth/jwt.js';
 
 const LOCAL_USER = Object.freeze({ id: 1, username: 'local' });
-
-// Kept for backwards compatibility with auth routes that may still import it.
-const JWT_SECRET = process.env.JWT_SECRET || appConfigDb.getOrCreateJwtSecret();
 
 // Optional API key middleware (still honored when API_KEY env is set).
 const validateApiKey = (req, res, next) => {
@@ -22,21 +21,41 @@ const validateApiKey = (req, res, next) => {
   next();
 };
 
-// Auth disabled: every request is authenticated as the synthetic local user.
+// Sliding refresh: when the token still has <= refreshWindowSeconds left, issue
+// a fresh one in X-Refreshed-Token (the frontend stores it automatically).
+const maybeRefreshToken = (res, payload) => {
+  const now = Math.floor(Date.now() / 1000);
+  const remaining = payload.exp - now;
+  if (remaining > 0 && remaining <= authConfig.refreshWindowSeconds) {
+    res.set('X-Refreshed-Token', signToken({ sub: payload.sub, username: payload.username }));
+  }
+};
+
 const authenticateToken = async (req, res, next) => {
-  req.user = LOCAL_USER;
+  if (!isAuthEnabled()) {
+    req.user = LOCAL_USER;
+    return next();
+  }
+  const token = extractTokenFromRequest(req);
+  const payload = token ? verifyToken(token) : null;
+  if (!payload) {
+    return res.status(401).json({ error: '未登录或登录已过期' });
+  }
+  req.user = { id: payload.sub, username: payload.username };
+  maybeRefreshToken(res, payload);
   next();
 };
 
-const generateToken = () => '';
-
-// WebSocket auth disabled: accept every connection.
-const authenticateWebSocket = () => ({ id: 1, userId: 1, username: 'local' });
-
-export {
-  validateApiKey,
-  authenticateToken,
-  generateToken,
-  authenticateWebSocket,
-  JWT_SECRET
+// WebSocket auth: verify ?token= or Authorization header; null rejects the upgrade.
+const authenticateWebSocket = (token) => {
+  if (!isAuthEnabled()) {
+    return { id: 1, userId: 1, username: 'local' };
+  }
+  const payload = token ? verifyToken(token) : null;
+  if (!payload) {
+    return null;
+  }
+  return { id: payload.sub, userId: payload.sub, username: payload.username };
 };
+
+export { validateApiKey, authenticateToken, authenticateWebSocket };
