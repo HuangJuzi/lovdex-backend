@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { authenticateToken, authenticateWebSocket } from '@/middleware/auth.js';
+import { authenticateToken, authenticateWebSocket, validateApiKey } from '@/middleware/auth.js';
 import { authConfig } from '@/modules/auth/auth.config.js';
 import { signToken } from '@/modules/auth/jwt.js';
 
@@ -12,6 +12,7 @@ const EMAIL = 'zhiju.huang@sophgo.com';
 type MockReq = {
   headers: Record<string, string>;
   query: Record<string, unknown>;
+  apiKeyValidated?: boolean;
   user?: { id: number | string; username: string };
 };
 type MockRes = {
@@ -111,5 +112,43 @@ test('authenticateWebSocket returns the local user when auth is disabled', () =>
   } finally {
     if (original === undefined) delete process.env.AUTH_ENABLED;
     else process.env.AUTH_ENABLED = original;
+  }
+});
+
+test('authenticateToken lets an API-key-authenticated request through without a JWT', async () => {
+  const originalKey = process.env.API_KEY;
+  const originalEnabled = process.env.AUTH_ENABLED;
+  process.env.API_KEY = 'secret';
+  process.env.AUTH_ENABLED = 'true';
+  try {
+    const req = mockReq();
+    req.headers = { 'x-api-key': 'secret' };
+    const res = mockRes();
+    await new Promise<void>((resolve) => validateApiKey(req, res, () => resolve()));
+    let called = false;
+    await authenticateToken(req, res, () => { called = true; });
+    assert.equal(called, true);
+    assert.equal(req.user?.username, 'local');
+  } finally {
+    if (originalKey === undefined) delete process.env.API_KEY;
+    else process.env.API_KEY = originalKey;
+    if (originalEnabled === undefined) delete process.env.AUTH_ENABLED;
+    else process.env.AUTH_ENABLED = originalEnabled;
+  }
+});
+
+test('validateApiKey rejects a wrong API key', async () => {
+  const originalKey = process.env.API_KEY;
+  process.env.API_KEY = 'secret';
+  try {
+    const req = mockReq();
+    req.headers = { 'x-api-key': 'wrong' };
+    const res = mockRes();
+    let called = false;
+    validateApiKey(req, res, () => { called = true; });
+    assert.equal(called, false);
+  } finally {
+    if (originalKey === undefined) delete process.env.API_KEY;
+    else process.env.API_KEY = originalKey;
   }
 });

@@ -18,6 +18,7 @@ const validateApiKey = (req, res, next) => {
   if (apiKey !== process.env.API_KEY) {
     return res.status(401).json({ error: 'Invalid API key' });
   }
+  req.apiKeyValidated = true;
   next();
 };
 
@@ -32,7 +33,7 @@ const maybeRefreshToken = (res, payload) => {
 };
 
 const authenticateToken = async (req, res, next) => {
-  if (!isAuthEnabled()) {
+  if (!isAuthEnabled() || req.apiKeyValidated) {
     req.user = LOCAL_USER;
     return next();
   }
