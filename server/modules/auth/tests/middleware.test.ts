@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { authenticateToken, authenticateWebSocket, validateApiKey } from '@/middleware/auth.js';
-import { authConfig } from '@/modules/auth/auth.config.js';
 import { signToken } from '@/modules/auth/jwt.js';
 
 const EMAIL = 'zhiju.huang@sophgo.com';
