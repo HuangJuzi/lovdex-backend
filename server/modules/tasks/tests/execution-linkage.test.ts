@@ -102,13 +102,13 @@ test('running reopens an in_review task to in_progress (resume from review)', ()
   assert.equal(rows[0].status, 'in_progress');
 });
 
-test('running does not reopen a done task (session continues with other work)', () => {
+test('running reopens a done task to in_progress (agent works again)', () => {
   const rows = [makeRow({ status: 'done', session_id: 's1' })];
   const svc = createTasksService(makeDb(rows), { broadcast: () => {} });
   svc.onSessionStatus('s1', 'running');
-  // A done task is terminal: session activity (often unrelated follow-up work)
-  // must not flip it back to in_progress and later re-judge it as failed.
-  assert.equal(rows[0].status, 'done');
+  // A done task the user reopened still goes back to in_progress; the follow-up
+  // completion just must not re-run the AI verdict (covered in the status tests).
+  assert.equal(rows[0].status, 'in_progress');
 });
 
 test('running on an already in_progress task re-emits to refresh realtime flags', () => {

@@ -115,6 +115,14 @@ export function createTasksService(
     opts.deps?.sessionsDb?.getSessionById
     ?? ((_sessionId: string) => null);
 
+  // Task ids whose linked session resumed after the task was marked done. A
+  // `done` task reopens to in_progress when its session runs again (the user
+  // continues chatting — often unrelated follow-up work). On completion we
+  // must NOT re-run the AI verdict for these: judging the whole transcript
+  // against the original task title would flag the unrelated follow-up as
+  // failed/blocked and downgrade an already-finished task.
+  const reopenedFromDone = new Set<string>();
+
   /**
    * Hard-deletes a session row plus its transcript file. Production default is a
    * lazy import of sessionsService so unit tests (which inject a stub) never pull
@@ -378,11 +386,6 @@ export function createTasksService(
     onSessionStatus(sessionId: string, state: 'running' | 'completed' | 'failed' | 'aborted'): void {
       const row = resolveDb.getTaskBySessionId(sessionId);
       if (!row) return;
-      // A task the user marked done is terminal: continuing to chat in its
-      // linked session (often unrelated follow-up work) must not reopen it or
-      // re-judge it. Re-opening a finished task is an explicit act — move it
-      // back to todo/in_progress first.
-      if (row.status === 'done') return;
       switch (state) {
         case 'running':
           // A live run means the agent is actively working, so the task must
@@ -392,6 +395,9 @@ export function createTasksService(
           // board should never show "评审中/已完成" while the agent is typing.
           // Clear any persisted `failed` tag: a fresh run supersedes the old
           // failure, so the badge drops back to the running spinner.
+          // Remember a task reopened from done: its completion must not re-trigger
+          // the AI verdict (the follow-up work is often unrelated to the task).
+          if (row.status === 'done') reopenedFromDone.add(row.task_id);
           resolveDb.updateTaskSubStatus(row.task_id, null);
           if (row.status !== 'in_progress') {
             applyStatusChange(row.task_id, 'in_progress', 'engine');
@@ -404,6 +410,13 @@ export function createTasksService(
           // Reset sub_status once work settles: the task now awaits the AI
           // verdict (writeSummary), which will fold done/only_plan/… back in.
           resolveDb.updateTaskSubStatus(row.task_id, null);
+          // A task reopened from done skips the auto-verdict: re-judging the
+          // whole transcript against the original title would flag unrelated
+          // follow-up work as failed/blocked and downgrade a finished task.
+          // It lands in in_review and the user decides.
+          const reopened = reopenedFromDone.has(row.task_id);
+          reopenedFromDone.delete(row.task_id);
+          if (reopened) break;
           // Fire the auto-verdict hook AFTER the in_review transition. The T9
           // trigger attaches here to schedule a headless operator run. Optional
           // so installs without the trigger (and existing unit tests) are
