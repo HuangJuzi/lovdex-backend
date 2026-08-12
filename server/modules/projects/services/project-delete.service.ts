@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
 import { projectsDb, sessionsDb } from '@/modules/database/index.js';
+import { removeProjectTempDir } from '@/modules/assets/services/file-assets.service.js';
 import { AppError } from '@/shared/utils.js';
 
 function uniqueJsonlPathsFromSessions(
@@ -70,6 +71,7 @@ export async function deleteOrArchiveProject(projectId: string, force: boolean):
   }
 
   await deleteSessionJsonlFilesForProjectPath(row.project_path);
+  await removeProjectTempDir(row.project_path);
   sessionsDb.deleteSessionsByProjectPath(row.project_path);
   projectsDb.deleteProjectById(projectId);
 }

@@ -4,6 +4,11 @@ import express from 'express';
 import mime from 'mime-types';
 import multer from 'multer';
 
+import { projectsDb } from '@/modules/database/index.js';
+import {
+  buildStoredFileRecords,
+  ensureProjectTempDir,
+} from '@/modules/assets/services/file-assets.service.js';
 import {
   buildStoredImageRecords,
   ensureImageAssetsDir,
@@ -97,6 +102,70 @@ router.get('/images/:filename', async (req, res) => {
     if (!res.headersSent) {
       res.status(500).json({ error: 'Error reading asset' });
     }
+  });
+});
+
+/**
+ * Chat 附件（分析文件/日志）：任意 MIME，≤50MB，最多 5 个。
+ * 存到 <projectPath>/.lovdex-tmp/，绝对路径随响应返回；不提供 HTTP 回读，
+ * 由代理 CLI 直接读磁盘。projectId 经查询串传入（multipart 里放字段会与
+ * multer 的字段/文件处理顺序耦合，查询串更稳）。
+ */
+const fileStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = (req as { projectTmpDir?: string }).projectTmpDir;
+    if (dir) {
+      cb(null, dir);
+    } else {
+      cb(new Error('projectTmpDir not resolved'), '');
+    }
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+    const sanitizedName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
+    cb(null, `${uniqueSuffix}-${sanitizedName}`);
+  },
+});
+
+const fileUpload = multer({
+  storage: fileStorage,
+  fileFilter: (req, file, cb) => cb(null, true),
+  limits: {
+    fileSize: 50 * 1024 * 1024, // 50MB
+    files: 5,
+  },
+});
+
+router.post('/files', async (req, res) => {
+  const projectId = typeof req.query.projectId === 'string' ? req.query.projectId : '';
+  if (!projectId) {
+    return res.status(400).json({ error: 'Missing projectId query parameter' });
+  }
+
+  const projectPath = projectsDb.getProjectPathById(projectId);
+  if (!projectPath) {
+    return res.status(400).json({ error: 'Unknown projectId' });
+  }
+
+  try {
+    (req as { projectTmpDir?: string }).projectTmpDir = await ensureProjectTempDir(projectPath);
+  } catch (error) {
+    console.error('[assets] Failed to prepare project temp dir:', error);
+    return res.status(500).json({ error: 'Failed to prepare upload directory' });
+  }
+
+  fileUpload.array('files', 5)(req, res, (err: unknown) => {
+    if (err) {
+      const message = err instanceof Error ? err.message : 'Upload failed';
+      return res.status(400).json({ error: message });
+    }
+
+    const files = Array.isArray(req.files) ? req.files : [];
+    if (files.length === 0) {
+      return res.status(400).json({ error: 'No files provided' });
+    }
+
+    res.json({ files: buildStoredFileRecords(projectPath, files) });
   });
 });
 
