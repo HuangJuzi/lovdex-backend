@@ -673,6 +673,8 @@ export type TaskRow = {
   executor_model: string | null;
   position: number;
   session_id: string | null;
+  /** 定时任务来源:关联的 scheduled_tasks.schedule_id(由定时任务创建的任务才有值)。 */
+  source_schedule_id: string | null;
   started_at: string | null;
   completed_at: string | null;
   created_at: string;
@@ -700,4 +702,45 @@ export type TaskRow = {
    * Null when not pending. Decorated by the tasks service from the run registry.
    */
   pending_tool?: string | null;
+};
+
+// ---------------------------
+//----------------- SCHEDULED TASK TYPES ------------
+/**
+ * How a scheduled task's trigger time is derived.
+ *
+ * - `once`: single one-shot run at `run_at`
+ * - `interval`: recurring run every `interval_seconds`
+ * - `cron`: recurring run matched against `cron_expr` in `timezone`
+ */
+export type ScheduledTaskScheduleType = 'once' | 'interval' | 'cron';
+
+/**
+ * Canonical scheduled-task row shape returned by the scheduled-tasks repository.
+ *
+ * Field names mirror the `scheduled_tasks` table columns exactly (snake_case).
+ * `is_operator` marks Lovdex 助手 tasks (1 when `project_path` is NULL).
+ */
+export type ScheduledTaskRow = {
+  schedule_id: string;
+  title: string;
+  description: string | null;
+  project_path: string | null;
+  executor_provider: string;
+  executor_model: string | null;
+  priority: string;
+  label: string;
+  is_operator: number; // 0 | 1 — project_path 为 NULL 时 1
+  auto_run: number;    // 0 | 1
+  schedule_type: ScheduledTaskScheduleType;
+  cron_expr: string | null;
+  interval_seconds: number | null;
+  run_at: string | null;
+  timezone: string;
+  next_run_at: string;
+  last_run_at: string | null;
+  last_task_id: string | null;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
 };
