@@ -14,7 +14,7 @@ type GitRouterDependencies = {
   resolveProjectPathById(projectId: string): string | null;
 };
 
-/** Creates Git routes around explicit repository, filesystem, subprocess, and AI adapters. */
+/** Creates Git routes around explicit repository, filesystem, subprocess adapters. */
 export function createGitRouter(dependencies: GitRouterDependencies): express.Router {
 const fs = dependencies.fileSystem;
 const spawn = dependencies.spawnProcess;
