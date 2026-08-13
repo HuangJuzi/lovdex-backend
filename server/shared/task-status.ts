@@ -71,7 +71,7 @@ export function isTaskDeadline(value: unknown): value is string {
   return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
 }
 
-export const TASK_LABELS = ['bug', 'feature', 'optimization', 'refactor', 'docs', 'other'] as const;
+export const TASK_LABELS = ['bug', 'feature', 'optimization', 'refactor', 'docs', 'other', 'reminder'] as const;
 export type TaskLabel = (typeof TASK_LABELS)[number];
 
 export function isTaskLabel(value: unknown): value is TaskLabel {

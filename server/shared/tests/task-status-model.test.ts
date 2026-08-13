@@ -51,9 +51,10 @@ test('isTaskDeadline validates YYYY-MM-DD real dates', () => {
   assert.equal(isTaskDeadline(null), false);
 });
 
-test('TASK_LABELS is the six categories', () => {
-  assert.deepEqual(TASK_LABELS, ['bug', 'feature', 'optimization', 'refactor', 'docs', 'other']);
+test('TASK_LABELS is the seven categories', () => {
+  assert.deepEqual(TASK_LABELS, ['bug', 'feature', 'optimization', 'refactor', 'docs', 'other', 'reminder']);
   assert.equal(isTaskLabel('bug'), true);
+  assert.equal(isTaskLabel('reminder'), true);
   assert.equal(isTaskLabel('nope'), false);
   assert.equal(isTaskLabel(undefined), false);
 });

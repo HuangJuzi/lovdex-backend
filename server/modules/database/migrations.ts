@@ -534,6 +534,44 @@ const migrateTasksTable = (db: Database): void => {
       throw err;
     }
   }
+
+  // Scheduled-tasks: link created tasks back to their schedule template.
+  // Adds the column unconditionally (fresh DBs already have it via
+  // TASKS_TABLE_SCHEMA_SQL; upgraded DBs get it here). Re-fetch column names:
+  // a rebuild above may have just recreated `tasks` from TASKS_TABLE_SCHEMA_SQL
+  // (which already carries source_schedule_id), so the earlier snapshot would
+  // be stale and falsely trigger ALTER TABLE ADD COLUMN.
+  const currentTaskColumnNames = (db.prepare('PRAGMA table_info(tasks)').all() as { name: string }[]).map((column) => column.name);
+  addColumnToTableIfNotExists(db, 'tasks', currentTaskColumnNames, 'source_schedule_id', 'TEXT');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_source_schedule ON tasks(source_schedule_id)');
+
+  // Rebuild the tasks table to extend the label CHECK constraint with
+  // 'reminder' (SQLite can't ALTER a CHECK, so rename → recreate from the
+  // current schema → copy every column → drop legacy). Gated on the current
+  // DDL lacking 'reminder' so it's idempotent. The index name conflict is
+  // why DROP TABLE tasks_legacy_label runs BEFORE the indexes are recreated.
+  const tasksDdl = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'").get() as { sql: string } | undefined;
+  if (tasksDdl && !tasksDdl.sql.includes("'reminder'")) {
+    console.log('Running migration: rebuilding tasks table for label CHECK (reminder)');
+    try {
+      db.exec('BEGIN');
+      db.exec('ALTER TABLE tasks RENAME TO tasks_legacy_label;');
+      db.exec(TASKS_TABLE_SCHEMA_SQL);
+      db.exec(`
+        INSERT INTO tasks (task_id, project_path, title, description, status, executor_provider, executor_model, position, session_id, started_at, completed_at, created_at, updated_at, ai_summary, sub_status, verdict_reason, verdict_at, priority, deadline, is_operator, label, remark, source_schedule_id)
+        SELECT task_id, project_path, title, description, status, executor_provider, executor_model, position, session_id, started_at, completed_at, created_at, updated_at, ai_summary, sub_status, verdict_reason, verdict_at, priority, deadline, is_operator, label, remark, source_schedule_id
+        FROM tasks_legacy_label
+      `);
+      db.exec('DROP TABLE tasks_legacy_label;');
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_project_status ON tasks(project_path, status);`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_id);`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_source_schedule ON tasks(source_schedule_id);`);
+      db.exec('COMMIT');
+    } catch (err) {
+      db.exec('ROLLBACK');
+      throw err;
+    }
+  }
 };
 
 export const runMigrations = (db: Database) => {

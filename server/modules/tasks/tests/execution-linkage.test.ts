@@ -43,6 +43,7 @@ function makeRow(overrides: Partial<Row> = {}): Row {
     executor_model: null,
     position: 0,
     session_id: 's1',
+    source_schedule_id: null,
     started_at: null,
     completed_at: null,
     created_at: '2026-01-01',

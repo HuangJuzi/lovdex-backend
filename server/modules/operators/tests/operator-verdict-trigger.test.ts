@@ -54,6 +54,7 @@ function makeRow(overrides: Partial<TaskRow> = {}): TaskRow {
     executor_model: null,
     position: 1,
     session_id: 's1',
+    source_schedule_id: null,
     started_at: null,
     completed_at: null,
     created_at: '2026-01-01T00:00:00.000Z',
