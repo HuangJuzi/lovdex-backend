@@ -47,6 +47,8 @@ import providerRoutes from './modules/providers/provider.routes.js';
 import { assetsRoutes } from './modules/assets/index.js';
 import { initializeDatabase, projectsDb, sessionsDb, tasksDb } from './modules/database/index.js';
 import { buildTasksRouter, createTasksService } from './modules/tasks/index.js';
+import { createGitModule } from './modules/git/index.js';
+import { worktreesRoutes } from './modules/worktrees/index.js';
 import { buildOperatorRouter } from './modules/operators/operator.routes.js';
 import { cleanOperatorWorkspaceLegacySessions } from './modules/operators/operator-cleanup.service.js';
 import { scheduleAutoVerdict } from './modules/operators/operator-verdict.service.js';
@@ -281,6 +283,12 @@ initOperatorHeadless({
 app.use('/api/tasks', authenticateToken, buildTasksRouter(tasksService, {
     createSession: createAppSession,
 }));
+
+// Git (Source Control) API Routes (protected)
+app.use('/api/git', authenticateToken, createGitModule());
+
+// Git worktrees API Routes (protected)
+app.use('/api/worktrees', authenticateToken, worktreesRoutes);
 
 // Operator settings API (protected) — read/update operator automation config.
 app.use('/api/operator/settings', authenticateToken, buildOperatorRouter());
