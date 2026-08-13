@@ -75,3 +75,44 @@ export const authConfig = {
  */
 export const isAuthEnabled = (): boolean =>
   !IS_PLATFORM && process.env.AUTH_ENABLED !== 'false';
+
+export const MIN_CODE_LENGTH = 4;
+export const MAX_CODE_LENGTH = 64;
+
+/**
+ * Persists a new verification code to the config file (atomic tmp + rename) and
+ * hot-updates the in-memory value so the change applies immediately. Returns
+ * false (and leaves memory untouched) if the write fails. `configPath` is a
+ * test seam — production always targets the real CONFIG_PATH.
+ */
+export function updateAuthCode(newCode: string, configPath: string = CONFIG_PATH): boolean {
+  let existing: AuthCredentials;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8')) as Partial<AuthCredentials>;
+    existing = {
+      email: typeof parsed.email === 'string' && parsed.email ? parsed.email : authConfig.email,
+      code: typeof parsed.code === 'string' && parsed.code ? parsed.code : authConfig.code,
+      jwtSecret:
+        typeof parsed.jwtSecret === 'string' && parsed.jwtSecret
+          ? parsed.jwtSecret
+          : authConfig.jwtSecret,
+    };
+  } catch {
+    existing = { email: authConfig.email, code: authConfig.code, jwtSecret: authConfig.jwtSecret };
+  }
+  const next = { ...existing, code: newCode };
+  const tmpPath = `${configPath}.tmp`;
+  try {
+    fs.writeFileSync(tmpPath, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
+    fs.renameSync(tmpPath, configPath);
+  } catch (err) {
+    console.warn(
+      `[auth] Failed to persist new code to ${configPath}:`,
+      err instanceof Error ? err.message : String(err)
+    );
+    return false;
+  }
+  authConfig.code = newCode;
+  console.log(`[auth] Verification code updated (persisted to ${configPath})`);
+  return true;
+}
