@@ -1,19 +1,67 @@
 /**
- * Auth gate configuration. All knobs are code constants with env overrides —
- * nothing lives in the database, so the login path stays DB-independent.
- * AUTH_ENABLED=false is the escape hatch that reverts to the open no-login
- * mode (see middleware/auth.js).
+ * Auth gate configuration. The login credentials (email / verification code /
+ * JWT signing key) live in `auth.config.json` — a plain config file, NOT in
+ * environment variables. Edit that file to change who can log in.
+ *
+ * AUTH_ENABLED stays an env switch: setting AUTH_ENABLED=false reverts to the
+ * open no-login mode (safety valve). Platform mode is exempt.
  */
+
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 import { IS_PLATFORM } from '@/constants/config.js';
 
+type AuthCredentials = {
+  email: string;
+  code: string;
+  jwtSecret: string;
+};
+
+const CONFIG_PATH = fileURLToPath(new URL('./auth.config.json', import.meta.url));
+
+const DEFAULT_CREDENTIALS: AuthCredentials = {
+  email: 'zhiju.huang@sophgo.com',
+  code: '888888',
+  jwtSecret: 'lovdex@2026',
+};
+
+/**
+ * Loads the credentials from the JSON config file. Falls back to the defaults
+ * if the file is missing or malformed so the app never fails to boot or locks
+ * itself out — but the misconfiguration is logged loudly.
+ */
+function loadCredentials(): AuthCredentials {
+  try {
+    const raw = fs.readFileSync(CONFIG_PATH, 'utf8');
+    const parsed = JSON.parse(raw) as Partial<AuthCredentials>;
+    return {
+      email:
+        typeof parsed.email === 'string' && parsed.email ? parsed.email : DEFAULT_CREDENTIALS.email,
+      code: typeof parsed.code === 'string' && parsed.code ? parsed.code : DEFAULT_CREDENTIALS.code,
+      jwtSecret:
+        typeof parsed.jwtSecret === 'string' && parsed.jwtSecret
+          ? parsed.jwtSecret
+          : DEFAULT_CREDENTIALS.jwtSecret,
+    };
+  } catch (err) {
+    console.warn(
+      `[auth] Could not read ${CONFIG_PATH}; using default credentials:`,
+      err instanceof Error ? err.message : String(err)
+    );
+    return DEFAULT_CREDENTIALS;
+  }
+}
+
+const credentials = loadCredentials();
+
 export const authConfig = {
   /** Allowed login email. */
-  email: process.env.AUTH_EMAIL || 'zhiju.huang@sophgo.com',
-  /** Fixed verification code. */
-  code: process.env.AUTH_CODE || '888888',
+  email: credentials.email,
+  /** Fixed verification code / password. */
+  code: credentials.code,
   /** HS256 signing key. */
-  jwtSecret: process.env.JWT_SECRET || 'lovdex@2026',
+  jwtSecret: credentials.jwtSecret,
   /** Token lifetime: 7 days. */
   expiresInSeconds: 7 * 24 * 60 * 60,
   /** When a token has this much (or less) life left, re-issue on the next request. */
