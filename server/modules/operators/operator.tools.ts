@@ -72,6 +72,14 @@ export type OperatorToolDeps = {
    * can dispatch a task without hardcoding the session-creation strategy.
    */
   createSession?: (provider: TaskEngine, projectPath: string) => string;
+  /**
+   * Kick off the agent run for a task's just-created session headlessly
+   * (no browser socket). Injected from index.js so start_task_execution can
+   * dispatch a task that actually runs — without it the tool only creates the
+   * session and the task sits idle in todo. Optional so pure-logic unit tests
+   * that only assert session-creation pass-through can omit it.
+   */
+  startTaskRun?: (taskId: string, sessionId: string) => boolean;
   contextProjectPath?: string | null;
 };
 
@@ -232,8 +240,25 @@ export function buildOperatorTools(deps: OperatorToolDeps) {
         properties: { taskId: { type: 'string' } },
         required: ['taskId'],
       },
-      handler: async (i: { taskId: string }) =>
-        deps.tasks.startExecution(i.taskId, deps.createSession!),
+      handler: async (i: { taskId: string }) => {
+        const result = deps.tasks.startExecution(i.taskId, deps.createSession!) as
+          | { sessionId?: string }
+          | null;
+        // Now actually start the agent run headlessly. The interactive path
+        // does this by sending a `chat.send` WebSocket frame from the browser;
+        // the operator runs server-side with no socket, so it calls the
+        // injected launcher instead. A launch failure is swallowed — the
+        // session is already created and linked, so the operator can still
+        // inspect it; crashing the tool would just hide the sessionId.
+        if (result?.sessionId && deps.startTaskRun) {
+          try {
+            deps.startTaskRun(i.taskId, result.sessionId);
+          } catch (e) {
+            console.error('[start_task_execution] headless run failed', e);
+          }
+        }
+        return result;
+      },
     },
     update_task: {
       description:

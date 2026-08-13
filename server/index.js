@@ -16,6 +16,7 @@ import { AppError, WORKSPACES_ROOT, validateWorkspacePath } from '@/shared/utils
 import { closeSessionsWatcher, initializeSessionsWatcher } from '@/modules/providers/index.js';
 import { createWebSocketServer, connectedClients, WS_OPEN_STATE } from '@/modules/websocket/index.js';
 import { chatRunRegistry, setTaskLinkage } from '@/modules/websocket/services/chat-run-registry.service.js';
+import { startHeadlessTaskRun } from '@/modules/websocket/services/headless-task-run.service.js';
 
 import { getConnectableHost } from '../shared/networkHosts.js';
 
@@ -85,6 +86,15 @@ function readUsageNumber(value) {
 const app = express();
 const server = http.createServer(app);
 
+// Provider runtimes keyed by provider id. Shared by the WebSocket server
+// (interactive chat.send path) and the headless task-run launcher (operator
+// start_task_execution path) so there is one source of truth.
+const spawnFns = {
+    claude: queryClaudeSDK,
+    codex: queryCodex,
+    sophcode: querySophcode,
+};
+
 // Single WebSocket server that handles chat.
 const wss = createWebSocketServer(server, {
     verifyClient: {
@@ -92,11 +102,7 @@ const wss = createWebSocketServer(server, {
         authenticateWebSocket,
     },
     chat: {
-        spawnFns: {
-            claude: queryClaudeSDK,
-            codex: queryCodex,
-            sophcode: querySophcode,
-        },
+        spawnFns,
         abortFns: {
             claude: abortClaudeSDKSession,
             codex: abortCodexSession,
@@ -238,6 +244,21 @@ try {
 const createAppSession = (provider, projectPath, isOperator) =>
     sessionsDb.createAppSession(crypto.randomUUID(), provider, projectPath, isOperator);
 
+// Headless task-run launcher for the operator's start_task_execution tool.
+// Mirrors the browser's chat.send: after startExecution creates + links the
+// session, this kicks off the agent run server-side (no socket) so the task
+// actually executes — without it the task sat idle in todo with started_at
+// null. Prompt mirrors taskPromptOf (description falling back to title).
+const startTaskRun = (taskId, sessionId) => {
+    const task = tasksService.getTask(taskId);
+    const content = (task?.description ?? '').trim() || task?.title || '';
+    return startHeadlessTaskRun(sessionId, {
+        content,
+        model: task?.executor_model ?? null,
+        spawnFns,
+    });
+};
+
 // Wire the operator headless run deps: the real tasksService (adapted so the
 // string-typed operator tool inputs are narrowed to TaskStatus at the boundary),
 // projectsDb, sessionsService, and createSession. runOperatorHeadless (in
@@ -248,6 +269,7 @@ initOperatorHeadless({
     projects: projectsDb,
     sessions: sessionsService,
     createSession: createAppSession,
+    startTaskRun,
 });
 
 app.use('/api/tasks', authenticateToken, buildTasksRouter(tasksService, {

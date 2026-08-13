@@ -123,7 +123,11 @@ test('start_task_execution forwards the injected createSession to tasks.startExe
       return { sessionId: 'sess-created' };
     },
   };
-  const tools = buildOperatorTools({ tasks: fakeTasks as never, createSession });
+  const tools = buildOperatorTools({
+    tasks: fakeTasks as never,
+    createSession,
+    startTaskRun: () => true,
+  });
 
   const out = await tools.start_task_execution.handler({ taskId: 't1' });
   assert.equal(receivedId, 't1');
@@ -143,11 +147,72 @@ test('start_task_execution passes provider/projectPath/isOperator to the injecte
     startExecution: (_id: string, cs: (p: string, proj: string, isOp?: boolean) => string) =>
       cs('claude', '/workspace/proj', true),
   };
-  const tools = buildOperatorTools({ tasks: fakeTasks as never, createSession });
+  const tools = buildOperatorTools({
+    tasks: fakeTasks as never,
+    createSession,
+    startTaskRun: () => true,
+  });
 
   const out = await tools.start_task_execution.handler({ taskId: 't1' });
   assert.equal(out, 'sess-xyz');
   assert.deepEqual(receivedArgs, ['claude', '/workspace/proj', true]);
+});
+
+test('start_task_execution invokes startTaskRun with (taskId, sessionId) after startExecution', async () => {
+  // The fix for "start_task_execution only creates a session, never runs the
+  // agent": after startExecution returns a sessionId, the handler must call the
+  // injected headless launcher so the task actually starts. Returns the
+  // sessionId so the operator can still inspect the session.
+  const createSession = () => 'sess-run';
+  const fakeTasks = {
+    startExecution: () => ({ sessionId: 'sess-run' }),
+  };
+  let launchCalls: Array<{ taskId: string; sessionId: string }> = [];
+  const tools = buildOperatorTools({
+    tasks: fakeTasks as never,
+    createSession,
+    startTaskRun: (taskId: string, sessionId: string) => {
+      launchCalls.push({ taskId, sessionId });
+      return true;
+    },
+  });
+
+  const out = await tools.start_task_execution.handler({ taskId: 't9' });
+  assert.deepEqual(out, { sessionId: 'sess-run' });
+  assert.deepEqual(launchCalls, [{ taskId: 't9', sessionId: 'sess-run' }]);
+});
+
+test('start_task_execution swallows a throwing startTaskRun and still returns the sessionId', async () => {
+  // A headless-launch failure must not crash the tool — the session is already
+  // created and linked, so the operator can still inspect it. Mirrors the error
+  // isolation of scheduleAutoVerdict.
+  const createSession = () => 'sess-throw';
+  const fakeTasks = {
+    startExecution: () => ({ sessionId: 'sess-throw' }),
+  };
+  const tools = buildOperatorTools({
+    tasks: fakeTasks as never,
+    createSession,
+    startTaskRun: () => {
+      throw new Error('boom');
+    },
+  });
+
+  const out = await tools.start_task_execution.handler({ taskId: 't1' });
+  assert.deepEqual(out, { sessionId: 'sess-throw' });
+});
+
+test('start_task_execution still returns sessionId when startTaskRun is not wired', async () => {
+  // Backward compat / pure-logic test fixtures omit startTaskRun. The handler
+  // must not require it — it just skips the launch and returns the session.
+  const createSession = () => 'sess-bare';
+  const fakeTasks = {
+    startExecution: () => ({ sessionId: 'sess-bare' }),
+  };
+  const tools = buildOperatorTools({ tasks: fakeTasks as never, createSession });
+
+  const out = await tools.start_task_execution.handler({ taskId: 't1' });
+  assert.deepEqual(out, { sessionId: 'sess-bare' });
 });
 
 test('get_session_transcript returns finalOutput = newest assistant text (offset 0)', async () => {
