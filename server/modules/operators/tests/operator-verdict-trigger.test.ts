@@ -91,6 +91,10 @@ function makeDb(rows: TaskRow[]) {
       const t = tasks.get(id);
       if (t) t.sub_status = sub as TaskRow['sub_status'];
     },
+    clearVerdictFields: (id: string) => {
+      const t = tasks.get(id);
+      if (t) { t.ai_summary = null; t.verdict_reason = null; t.verdict_at = null; }
+    },
     linkSession: () => {},
     deleteTask: () => {},
     moveTask: () => {},

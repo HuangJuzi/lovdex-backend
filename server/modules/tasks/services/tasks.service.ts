@@ -45,6 +45,7 @@ export type TaskDbLike = Pick<
   | 'updateTask'
   | 'updateTaskStatus'
   | 'updateTaskSubStatus'
+  | 'clearVerdictFields'
   | 'linkSession'
   | 'deleteTask'
   | 'moveTask'
@@ -393,13 +394,45 @@ export function createTasksService(
           // Clear any persisted `failed` tag: a fresh run supersedes the old
           // failure, so the badge drops back to the running spinner.
           resolveDb.updateTaskSubStatus(row.task_id, null);
+          // Drop a stale premature verdict's audit (ai_summary / verdict_reason
+          // / verdict_at) so it neither surfaces as a residual tag nor taints the
+          // next verdict judge as prior context. A resumed task is being worked
+          // on again — any earlier verdict is obsolete.
+          resolveDb.clearVerdictFields(row.task_id);
           if (row.status !== 'in_progress') {
             applyStatusChange(row.task_id, 'in_progress', 'engine');
           } else {
             emit({ kind: 'task_upserted', task: resolveDb.getTask(row.task_id) ?? row, actor: 'engine' });
           }
           break;
-        case 'completed':
+        case 'completed': {
+          // Verdict trigger must align with the task lifecycle. A run that ends
+          // while the session is paused on an interactive tool (AskUserQuestion
+          // / ExitPlanMode) is a PAUSE waiting for a human decision, NOT a
+          // completion. The pending-approval map still holds the tool at this
+          // instant (the registry clears it only after this call returns), so
+          // we can read it here. Treating such a pause as "completed" would move
+          // the task to in_review and fire the auto-verdict on the intermediate
+          // "plan ready, how to proceed?" finalOutput — mislabeling in-progress
+          // work as failed/only_plan. Skip the in_review move and the verdict
+          // hook; the task stays in_progress (the board shows its waiting
+          // overlay via decorate). The agent's turn resumes when the human
+          // answers, which drives a fresh `running` event.
+          const pendingTool = row.session_id
+            ? pendingApprovalSessions().get(row.session_id as string) ?? null
+            : null;
+          const pausedOnInteraction =
+            pendingTool === 'AskUserQuestion'
+            || pendingTool === 'ExitPlanMode'
+            || pendingTool === 'exit_plan_mode';
+          if (pausedOnInteraction) {
+            // Drop any stale sub_status tag from an earlier premature verdict so
+            // the board reads as a clean in_progress pause, then re-emit so live
+            // boards refresh the waiting overlay.
+            resolveDb.updateTaskSubStatus(row.task_id, null);
+            emit({ kind: 'task_upserted', task: resolveDb.getTask(row.task_id) ?? row, actor: 'engine' });
+            break;
+          }
           if (row.status === 'in_progress') applyStatusChange(row.task_id, 'in_review', 'engine');
           // Reset sub_status once work settles: the task now awaits the AI
           // verdict (writeSummary), which will fold done/only_plan/… back in.
@@ -410,6 +443,7 @@ export function createTasksService(
           // unaffected.
           opts.onTaskCompleted?.(row.task_id, row.title, row.session_id);
           break;
+        }
         case 'failed':
           // A failed run does NOT move the task: it keeps its in_progress slot
           // and we persist sub_status='failed' so the board renders the "失败"
@@ -462,6 +496,16 @@ export function createTasksService(
       // must not downgrade a finished task's badge or move it off done.
       if (resolveDb.getTask(taskId)?.status === 'done') {
         return resolveDb.getTask(taskId);
+      }
+      // A verdict that lands while the task is still in_progress is stale: the
+      // task resumed (the user answered an AskUserQuestion and a fresh run
+      // started) or never settled to in_review. Writing a failed/only_plan tag
+      // here is exactly the "执行中 + 执行失败" contradiction — a running task
+      // must not be labeled by a verdict about an earlier turn. Leave the row
+      // untouched. (The normal flow reaches writeSummary with status=in_review.)
+      if (resolveDb.getTask(taskId)?.status === 'in_progress') {
+        const current = resolveDb.getTask(taskId);
+        return current ? decorate(current) : null;
       }
       const row = resolveDb.writeSummary(taskId, input);
       if (row) emit({ kind: 'task_upserted', task: row, actor: 'engine' });

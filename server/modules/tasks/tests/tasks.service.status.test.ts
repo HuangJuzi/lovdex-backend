@@ -206,6 +206,46 @@ test('reopened done task goes back to in_progress and still triggers the auto-ve
   });
 });
 
+test('resume (running) clears a stale premature verdict so it cannot taint the next run', async () => {
+  await withIsolatedDatabase(() => {
+    const id = seedTask();
+    const svc = makeService();
+    svc.onSessionStatus('s1', 'running');
+    svc.onSessionStatus('s1', 'completed');
+    // A verdict lands (e.g. a premature one from an earlier pause, or a legit
+    // one the user is about to override by resuming).
+    svc.writeSummary(id, { summary: 'stale', verdict: 'only_plan', reason: 'old' });
+    assert.equal(tasksDb.getTask(id)?.ai_summary, 'stale');
+    assert.ok(tasksDb.getTask(id)?.verdict_at);
+    // The task resumes: the fresh run must drop the old verdict audit so the
+    // next verdict judge does not cite it as prior context, and the board stops
+    // showing the stale tag.
+    svc.onSessionStatus('s1', 'running');
+    const row = tasksDb.getTask(id);
+    assert.equal(row?.sub_status, null);
+    assert.equal(row?.ai_summary, null);
+    assert.equal(row?.verdict_reason, null);
+    assert.equal(row?.verdict_at, null);
+  });
+});
+
+test('writeSummary on an in_progress (actively running) task is skipped — no stale label on a running task', async () => {
+  await withIsolatedDatabase(() => {
+    const id = seedTask();
+    const svc = makeService();
+    svc.onSessionStatus('s1', 'running'); // in_progress, actively running
+    // A verdict that lands while the task is still in_progress is stale (the
+    // task resumed or never settled to in_review). It must NOT label a running
+    // task failed/only_plan — that is the "执行中 + 执行失败" contradiction.
+    svc.writeSummary(id, { summary: 'late', verdict: 'failed', reason: 'stale' });
+    const row = tasksDb.getTask(id);
+    assert.equal(row?.status, 'in_progress');
+    assert.equal(row?.sub_status, null, 'sub_status must not be written');
+    assert.equal(row?.ai_summary, null, 'ai_summary must not be written');
+    assert.equal(row?.verdict_at, null, 'verdict_at must not be written');
+  });
+});
+
 test('late verdict does not downgrade a task the user already marked done', async () => {
   await withIsolatedDatabase(() => {
     const id = seedTask();

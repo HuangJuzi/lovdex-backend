@@ -16,6 +16,7 @@ function makeDb(initial: Row[]) {
     updateTask: (id: string, u: Partial<TaskRow>) => ({ task_id: id, ...u } as TaskRow),
     updateTaskStatus: (id: string, status: TaskRow['status']) => { const t = rows.find(x => x.task_id === id); if (t) t.status = status; },
     updateTaskSubStatus: (id: string, sub: PersistedSubStatus | null) => { const t = rows.find(x => x.task_id === id); if (t) t.sub_status = sub; },
+    clearVerdictFields: (id: string) => { const t = rows.find(x => x.task_id === id); if (t) { t.ai_summary = null; t.verdict_reason = null; t.verdict_at = null; } },
     linkSession: () => {},
     deleteTask: () => {},
     moveTask: () => {},
@@ -228,6 +229,68 @@ test('approval_pending defaults to false when no pending-sessions source is wire
   const rows = [makeRow({ status: 'in_progress', session_id: 's1' })];
   const svc = createTasksService(makeDb(rows), { broadcast: () => {} });
   assert.equal(svc.getTask('t1')?.approval_pending, false);
+});
+
+// ---------------------------------------------------------------------------
+// Verdict trigger must align with task lifecycle: a run that ends while the
+// session is paused on an interactive tool (AskUserQuestion / ExitPlanMode) is
+// a PAUSE waiting for a human decision, not a completion. Moving the task to
+// in_review and firing the auto-verdict hook on the intermediate "plan ready,
+// how to proceed?" text is what mislabels in-progress work as failed/only_plan.
+// ---------------------------------------------------------------------------
+
+test('completed with a pending AskUserQuestion does NOT move to in_review and does NOT fire onTaskCompleted', () => {
+  const rows = [makeRow({ status: 'in_progress', session_id: 's1' })];
+  let completedCalls = 0;
+  const svc = createTasksService(makeDb(rows), {
+    broadcast: () => {},
+    getPendingApprovalSessions: () => new Map([['s1', 'AskUserQuestion']]),
+    onTaskCompleted: () => { completedCalls++; },
+  });
+  svc.onSessionStatus('s1', 'completed');
+  assert.equal(rows[0].status, 'in_progress', 'task stays in_progress (paused, not done)');
+  assert.equal(completedCalls, 0, 'auto-verdict hook must not fire at a user-decision gate');
+});
+
+test('completed with a pending ExitPlanMode does NOT move to in_review and does NOT fire onTaskCompleted', () => {
+  const rows = [makeRow({ status: 'in_progress', session_id: 's1' })];
+  let completedCalls = 0;
+  const svc = createTasksService(makeDb(rows), {
+    broadcast: () => {},
+    getPendingApprovalSessions: () => new Map([['s1', 'ExitPlanMode']]),
+    onTaskCompleted: () => { completedCalls++; },
+  });
+  svc.onSessionStatus('s1', 'completed');
+  assert.equal(rows[0].status, 'in_progress');
+  assert.equal(completedCalls, 0);
+});
+
+test('completed with no pending approval still moves to in_review and fires onTaskCompleted (regression)', () => {
+  const rows = [makeRow({ status: 'in_progress', session_id: 's1' })];
+  let completedCalls = 0;
+  const svc = createTasksService(makeDb(rows), {
+    broadcast: () => {},
+    getPendingApprovalSessions: () => new Map(),
+    onTaskCompleted: () => { completedCalls++; },
+  });
+  svc.onSessionStatus('s1', 'completed');
+  assert.equal(rows[0].status, 'in_review');
+  assert.equal(completedCalls, 1);
+});
+
+test('completed with a pending non-interactive tool approval still triggers verdict (only interactive gates)', () => {
+  // A pending Bash approval at complete-time is not the AskUserQuestion pause
+  // case; only interactive tools (AskUserQuestion/ExitPlanMode) gate the verdict.
+  const rows = [makeRow({ status: 'in_progress', session_id: 's1' })];
+  let completedCalls = 0;
+  const svc = createTasksService(makeDb(rows), {
+    broadcast: () => {},
+    getPendingApprovalSessions: () => new Map([['s1', 'Bash']]),
+    onTaskCompleted: () => { completedCalls++; },
+  });
+  svc.onSessionStatus('s1', 'completed');
+  assert.equal(rows[0].status, 'in_review');
+  assert.equal(completedCalls, 1);
 });
 
 test('decorate derives waiting_answer for an in_progress task pending AskUserQuestion', () => {

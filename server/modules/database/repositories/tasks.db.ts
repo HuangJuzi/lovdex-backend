@@ -188,6 +188,23 @@ export const tasksDb = {
   },
 
   /**
+   * Clear the verdict audit fields (ai_summary / verdict_reason / verdict_at)
+   * without touching sub_status. Called when a task resumes execution (a fresh
+   * run starts) so a stale premature verdict — written when an earlier run ended
+   * at an AskUserQuestion pause — does not linger on the row and taint the next
+   * verdict judge (which reads these as weak prior-verdict context) nor surface
+   * on the board as a residual "failed" tag after the task has moved on.
+   */
+  clearVerdictFields(taskId: string): void {
+    const db = getConnection();
+    db.prepare(`
+      UPDATE tasks
+      SET ai_summary = NULL, verdict_reason = NULL, verdict_at = NULL, updated_at = CURRENT_TIMESTAMP
+      WHERE task_id = ?
+    `).run(taskId);
+  },
+
+  /**
    * Persist the operator agent's post-run verdict on a task: an AI summary,
    * the verdict folded into sub_status, an optional reason, and the moment it
    * was recorded. Validates the verdict BEFORE touching the DB so an invalid
