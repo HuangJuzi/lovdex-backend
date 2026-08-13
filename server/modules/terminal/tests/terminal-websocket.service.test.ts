@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import type { WebSocket } from 'ws';
+
 import { handleTerminalConnection, type PtyLike } from '@/modules/terminal/terminal-websocket.service.js';
 import type { AuthenticatedWebSocketRequest } from '@/shared/types.js';
 
@@ -46,11 +48,16 @@ function makeFakeWs() {
   return ws;
 }
 
+/** The fake exposes extra helpers (emit/state); cast to ws.WebSocket for the handler param. */
+function asSocket(fake: ReturnType<typeof makeFakeWs>): WebSocket {
+  return fake as unknown as WebSocket;
+}
+
 test('spawns a PTY with the configured shell and cwd', () => {
   const pty = makeFakePty();
   let captured: unknown = null;
   const ws = makeFakeWs();
-  handleTerminalConnection(ws, fakeRequest, {
+  handleTerminalConnection(asSocket(ws), fakeRequest, {
     spawnPty: (shell, args, options) => { captured = { shell, args, options }; return pty; },
     shell: '/bin/zsh',
     cwd: '/workspace',
@@ -65,7 +72,7 @@ test('spawns a PTY with the configured shell and cwd', () => {
 test('forwards input messages to the pty', () => {
   const pty = makeFakePty();
   const ws = makeFakeWs();
-  handleTerminalConnection(ws, fakeRequest, { spawnPty: () => pty, shell: 'bash', cwd: '/' });
+  handleTerminalConnection(asSocket(ws), fakeRequest, { spawnPty: () => pty, shell: 'bash', cwd: '/' });
   ws.emit('message', Buffer.from(JSON.stringify({ type: 'input', data: 'ls\r' })));
   assert.deepEqual(pty.state.written, ['ls\r']);
 });
@@ -73,7 +80,7 @@ test('forwards input messages to the pty', () => {
 test('sends pty output to the client', () => {
   const pty = makeFakePty();
   const ws = makeFakeWs();
-  handleTerminalConnection(ws, fakeRequest, { spawnPty: () => pty, shell: 'bash', cwd: '/' });
+  handleTerminalConnection(asSocket(ws), fakeRequest, { spawnPty: () => pty, shell: 'bash', cwd: '/' });
   pty.emitData('hello\n');
   assert.deepEqual(ws.state.sent, [JSON.stringify({ type: 'output', data: 'hello\n' })]);
 });
@@ -81,7 +88,7 @@ test('sends pty output to the client', () => {
 test('forwards resize and ignores invalid sizes', () => {
   const pty = makeFakePty();
   const ws = makeFakeWs();
-  handleTerminalConnection(ws, fakeRequest, { spawnPty: () => pty, shell: 'bash', cwd: '/' });
+  handleTerminalConnection(asSocket(ws), fakeRequest, { spawnPty: () => pty, shell: 'bash', cwd: '/' });
   ws.emit('message', Buffer.from(JSON.stringify({ type: 'resize', cols: 120, rows: 40 })));
   ws.emit('message', Buffer.from(JSON.stringify({ type: 'resize', cols: 0, rows: -5 })));
   assert.deepEqual(pty.state.resized, [[120, 40]]);
@@ -90,7 +97,7 @@ test('forwards resize and ignores invalid sizes', () => {
 test('sends exit and closes the socket when the pty exits', () => {
   const pty = makeFakePty();
   const ws = makeFakeWs();
-  handleTerminalConnection(ws, fakeRequest, { spawnPty: () => pty, shell: 'bash', cwd: '/' });
+  handleTerminalConnection(asSocket(ws), fakeRequest, { spawnPty: () => pty, shell: 'bash', cwd: '/' });
   pty.emitExit(0);
   assert.ok(ws.state.sent.includes(JSON.stringify({ type: 'exit', code: 0 })));
   assert.equal(ws.state.closed, true);
@@ -99,14 +106,14 @@ test('sends exit and closes the socket when the pty exits', () => {
 test('kills the pty when the socket closes', () => {
   const pty = makeFakePty();
   const ws = makeFakeWs();
-  handleTerminalConnection(ws, fakeRequest, { spawnPty: () => pty, shell: 'bash', cwd: '/' });
+  handleTerminalConnection(asSocket(ws), fakeRequest, { spawnPty: () => pty, shell: 'bash', cwd: '/' });
   ws.emit('close');
   assert.equal(pty.state.killed, true);
 });
 
 test('sends an error and closes when spawn fails', () => {
   const ws = makeFakeWs();
-  handleTerminalConnection(ws, fakeRequest, {
+  handleTerminalConnection(asSocket(ws), fakeRequest, {
     spawnPty: () => { throw new Error('boom'); },
     shell: 'bash',
     cwd: '/',
