@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 import http from 'node:http';
 
 import authRouter from '../auth.routes.js';
-import { authConfig } from '../auth.config.js';
+import { authConfig, updateAuthCode } from '../auth.config.js';
 import { signToken } from '../jwt.js';
 
 /** Boots the router on an ephemeral port and runs `run(baseUrl)`. */
@@ -84,6 +86,57 @@ test('me returns 401 for a garbage token', async () => {
     const res = await fetch(`${base}/api/auth/me`, {
       headers: { Authorization: 'Bearer not.a.jwt' },
     });
+    assert.equal(res.status, 401);
+  });
+});
+
+const CONFIG_PATH = fileURLToPath(new URL('../auth.config.json', import.meta.url));
+
+async function changePassword(base: string, opts: { token?: string; body: unknown }) {
+  const { token, body } = opts;
+  return fetch(`${base}/api/auth/change-password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify(body),
+  });
+}
+
+test('change-password updates the code when the current code matches', async () => {
+  const original = authConfig.code;
+  try {
+    await withServer(async (base) => {
+      const token = signToken({ sub: 1, username: authConfig.email });
+      const res = await changePassword(base, { token, body: { currentCode: original, newCode: 'newcode123' } });
+      assert.equal(res.status, 200);
+      assert.deepEqual(await res.json(), { ok: true });
+      assert.equal(authConfig.code, 'newcode123');
+      const persisted = JSON.parse(readFileSync(CONFIG_PATH, 'utf8')) as { code: string };
+      assert.equal(persisted.code, 'newcode123');
+    });
+  } finally {
+    updateAuthCode(original);
+  }
+});
+
+test('change-password rejects a wrong current code', async () => {
+  await withServer(async (base) => {
+    const token = signToken({ sub: 1, username: authConfig.email });
+    const res = await changePassword(base, { token, body: { currentCode: '000000', newCode: 'whatever123' } });
+    assert.equal(res.status, 401);
+  });
+});
+
+test('change-password rejects a too-short new code', async () => {
+  await withServer(async (base) => {
+    const token = signToken({ sub: 1, username: authConfig.email });
+    const res = await changePassword(base, { token, body: { currentCode: authConfig.code, newCode: 'ab' } });
+    assert.equal(res.status, 400);
+  });
+});
+
+test('change-password requires a valid token', async () => {
+  await withServer(async (base) => {
+    const res = await changePassword(base, { body: { currentCode: 'x', newCode: 'yyyy' } });
     assert.equal(res.status, 401);
   });
 });
