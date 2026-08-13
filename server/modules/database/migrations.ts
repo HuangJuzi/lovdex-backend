@@ -522,7 +522,7 @@ const migrateTasksTable = (db: Database): void => {
   // DDL lacking 'reminder' so it's idempotent. The index name conflict is
   // why DROP TABLE tasks_legacy_label runs BEFORE the indexes are recreated.
   const tasksDdl = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'").get() as { sql: string } | undefined;
-  if (tasksDdl && !/reminder/.test(tasksDdl.sql)) {
+  if (tasksDdl && !tasksDdl.sql.includes("'reminder'")) {
     console.log('Running migration: rebuilding tasks table for label CHECK (reminder)');
     try {
       db.exec('BEGIN');
