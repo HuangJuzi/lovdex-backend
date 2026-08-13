@@ -27,7 +27,16 @@ export const SUB_STATUSES = [
 export type SubStatus = (typeof SUB_STATUSES)[number];
 
 /** Persisted subset — the only values allowed in the tasks.sub_status column. */
-export const PERSISTED_SUB_STATUSES = ['failed', 'done', 'only_plan', 'needs_review', 'blocked'] as const;
+export const PERSISTED_SUB_STATUSES = [
+  'failed', 'done', 'only_plan', 'needs_review', 'blocked',
+  // A run that ended at an AskUserQuestion / ExitPlanMode gate leaves the task
+  // waiting for a human decision — a durable state that must survive the run
+  // ending and a backend restart, so it is persisted (not just a realtime
+  // overlay). Without it the board reads "进行中" for a session that has in
+  // fact stopped, which is exactly the "in progress = no human needed"
+  // contradiction. Cleared when the user answers and a fresh run starts.
+  'waiting_answer', 'waiting_plan',
+] as const;
 export type PersistedSubStatus = (typeof PERSISTED_SUB_STATUSES)[number];
 
 /** AI post-run verdicts (written by writeSummary → sub_status column). */

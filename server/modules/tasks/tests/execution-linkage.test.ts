@@ -249,6 +249,7 @@ test('completed with a pending AskUserQuestion does NOT move to in_review and do
   });
   svc.onSessionStatus('s1', 'completed');
   assert.equal(rows[0].status, 'in_progress', 'task stays in_progress (paused, not done)');
+  assert.equal(rows[0].sub_status, 'waiting_answer', 'persists waiting_answer so a stopped session is not shown as 进行中');
   assert.equal(completedCalls, 0, 'auto-verdict hook must not fire at a user-decision gate');
 });
 
@@ -262,7 +263,28 @@ test('completed with a pending ExitPlanMode does NOT move to in_review and does 
   });
   svc.onSessionStatus('s1', 'completed');
   assert.equal(rows[0].status, 'in_progress');
+  assert.equal(rows[0].sub_status, 'waiting_plan');
   assert.equal(completedCalls, 0);
+});
+
+test('decorate surfaces persisted waiting_answer for an in_progress task whose run has ended (no live pending approval)', () => {
+  // After the run ends at an AskUserQuestion the in-memory pending-approval map
+  // is cleared; the board must still show "等你回答" from the persisted tag, not
+  // "进行中".
+  const rows = [makeRow({ status: 'in_progress', session_id: 's1', sub_status: 'waiting_answer' })];
+  const svc = createTasksService(makeDb(rows), {
+    broadcast: () => {},
+    getPendingApprovalSessions: () => new Map(),
+  });
+  assert.equal(svc.getTask('t1')?.sub_status, 'waiting_answer');
+});
+
+test('reconcileFailedTasks skips a task paused waiting for a human decision (not an orphan)', () => {
+  const rows = [makeRow({ status: 'in_progress', session_id: 's1', sub_status: 'waiting_answer' })];
+  const svc = createTasksService(makeDb(rows), { broadcast: () => {} });
+  const changed = svc.reconcileFailedTasks(() => new Set());
+  assert.equal(changed, 0, 'a task waiting for a human answer is not a crashed/orphaned run');
+  assert.equal(rows[0].sub_status, 'waiting_answer');
 });
 
 test('completed with no pending approval still moves to in_review and fires onTaskCompleted (regression)', () => {

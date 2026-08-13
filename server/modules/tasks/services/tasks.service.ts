@@ -9,6 +9,7 @@ import {
   isTaskLabel,
   isTaskPriority,
   type AiVerdict,
+  type PersistedSubStatus,
   type SubStatus,
   type TaskLabel,
   type TaskPriority,
@@ -426,10 +427,17 @@ export function createTasksService(
             || pendingTool === 'ExitPlanMode'
             || pendingTool === 'exit_plan_mode';
           if (pausedOnInteraction) {
-            // Drop any stale sub_status tag from an earlier premature verdict so
-            // the board reads as a clean in_progress pause, then re-emit so live
-            // boards refresh the waiting overlay.
-            resolveDb.updateTaskSubStatus(row.task_id, null);
+            // The run ended at a user-decision gate: persist "waiting for human"
+            // (waiting_answer / waiting_plan) so the board reads "等你回答 /
+            // 等你确认计划" instead of "进行中" — a stopped session must not look
+            // like the agent is autonomously working. This is a durable state: it
+            // survives the run ending and a backend restart (the in-memory
+            // pending-approval overlay is cleared once this call returns, so the
+            // persisted tag is what the board reconstructs on reload). Cleared
+            // when the user answers and a fresh `running` event fires.
+            const waitTag: PersistedSubStatus =
+              pendingTool === 'ExitPlanMode' || pendingTool === 'exit_plan_mode' ? 'waiting_plan' : 'waiting_answer';
+            resolveDb.updateTaskSubStatus(row.task_id, waitTag);
             emit({ kind: 'task_upserted', task: resolveDb.getTask(row.task_id) ?? row, actor: 'engine' });
             break;
           }
@@ -533,6 +541,13 @@ export function createTasksService(
       let changed = 0;
       for (const row of resolveDb.listTasks({})) {
         if (row.status === 'in_progress' && row.session_id && !running.has(row.session_id)) {
+          // A task paused at an AskUserQuestion / ExitPlanMode gate ended its
+          // run cleanly (a terminal `complete` was delivered) and is legitimately
+          // waiting for a human decision — it is NOT an orphaned/crashed run.
+          // Reconcile must not overwrite that with 'failed'.
+          if (row.sub_status === 'waiting_answer' || row.sub_status === 'waiting_plan') {
+            continue;
+          }
           resolveDb.updateTaskSubStatus(row.task_id, 'failed');
           // Re-read after the write so the broadcast carries the persisted
           // sub_status (decorate would otherwise render the stale pre-update row

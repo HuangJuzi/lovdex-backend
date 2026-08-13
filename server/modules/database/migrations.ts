@@ -505,6 +505,35 @@ const migrateTasksTable = (db: Database): void => {
       throw err;
     }
   }
+
+  // Rebuild tasks table so the sub_status CHECK accepts the persisted
+  // waiting_answer / waiting_plan values (a run that ended at an
+  // AskUserQuestion / ExitPlanMode gate now persists "waiting for human" instead
+  // of falling back to the "进行中" running badge). Same rename→recreate→copy→
+  // drop pattern as the executor rebuild above; gated on 'waiting_answer' so it
+  // is idempotent and skipped on fresh installs whose schema already has it.
+  const tasksSqlForWaiting =
+    (db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'").get() as { sql?: string } | undefined)?.sql ?? '';
+  if (!tasksSqlForWaiting.includes("'waiting_answer'")) {
+    console.log('Running migration: rebuild tasks table to accept persisted waiting_* sub_status');
+    try {
+      db.exec('BEGIN');
+      db.exec('ALTER TABLE tasks RENAME TO tasks_legacy_waiting;');
+      db.exec(TASKS_TABLE_SCHEMA_SQL);
+      db.exec(`
+        INSERT INTO tasks (task_id, project_path, title, description, status, executor_provider, executor_model, position, session_id, started_at, completed_at, created_at, updated_at, ai_summary, sub_status, verdict_reason, verdict_at, priority, deadline, is_operator, label, remark)
+        SELECT task_id, project_path, title, description, status, executor_provider, executor_model, position, session_id, started_at, completed_at, created_at, updated_at, ai_summary, sub_status, verdict_reason, verdict_at, priority, deadline, is_operator, label, remark
+        FROM tasks_legacy_waiting;
+      `);
+      db.exec('DROP TABLE tasks_legacy_waiting;');
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_project_status ON tasks(project_path, status);`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_id);`);
+      db.exec('COMMIT');
+    } catch (err) {
+      db.exec('ROLLBACK');
+      throw err;
+    }
+  }
 };
 
 export const runMigrations = (db: Database) => {

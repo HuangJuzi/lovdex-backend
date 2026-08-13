@@ -25,8 +25,12 @@ test('sub_status is the full 10', () => {
 });
 
 test('persisted subset + ai verdicts', () => {
-  assert.deepEqual([...PERSISTED_SUB_STATUSES], ['failed', 'done', 'only_plan', 'needs_review', 'blocked']);
+  assert.deepEqual([...PERSISTED_SUB_STATUSES], [
+    'failed', 'done', 'only_plan', 'needs_review', 'blocked',
+    'waiting_answer', 'waiting_plan',
+  ]);
   assert.equal(isPersistedSubStatus('failed'), true);
+  assert.equal(isPersistedSubStatus('waiting_answer'), true);
   assert.equal(isPersistedSubStatus('running'), false);
   assert.deepEqual([...AI_VERDICTS], ['done', 'only_plan', 'needs_review', 'blocked']);
   assert.equal(isAiVerdict('blocked'), true);
