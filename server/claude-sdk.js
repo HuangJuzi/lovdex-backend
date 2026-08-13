@@ -1123,15 +1123,17 @@ export async function runOperatorHeadless({ sessionId, taskId, title, promptOver
   }
 
   // A task may already have an AI verdict from an earlier run (ai_summary /
-  // verdict_at survive reopening). When the user keeps chatting in a completed
-  // task's session — often unrelated follow-up work — the verdict must know the
-  // task was already finished so it doesn't downgrade done to failed/blocked
-  // just because the newest messages belong to that follow-up.
+  // verdict_at survive reopening). The prior verdict is only a weak reference:
+  // each run must judge this session's actual output independently. When the
+  // user keeps chatting in a completed task's session, an unrelated AND
+  // fully-wrapped-up follow-up may keep done — but a follow-up that is still
+  // plan-only / waiting for review / unimplemented must not be crushed back to
+  // done by the history prior.
   let priorVerdictContext = '';
   try {
     const taskRow = resolvedDeps.tasks?.getTask?.(taskId);
     if (taskRow?.ai_summary || taskRow?.verdict_at) {
-      priorVerdictContext = `\n【任务此前的判定记录】该任务此前已被 AI 判定过：verdict_at=${taskRow.verdict_at ?? '未知'}，summary="${taskRow.ai_summary ?? ''}"。若它此前已完成，而本次会话末尾的追加工作与主任务无关（例如用户在已完成任务的会话里继续做别的事），应保持 done——追加工作不应把已完成的旧任务重新判为失败/待办；仅当追加工作明确表明主任务交付物仍未完成或被破坏时才降级。\n`;
+      priorVerdictContext = `\n【任务此前的判定记录】该任务此前已被 AI 判定过：verdict_at=${taskRow.verdict_at ?? '未知'}，summary="${taskRow.ai_summary ?? ''}"。此前的判定只是弱参考，不得绑架本次判定——每次都应基于本会话的实际产出、验证结果与是否真正收尾独立评审。若本次追加工作与主任务无关，且追加工作本身也已完整收尾（改动落地、验证通过、无待决事项），可维持 done，不因追加工作的存在而降级；但若追加工作仍停留在计划/方案阶段、代码未实现（例如只有 spec 没有落地），或会话停在等 review/等用户决策，则按本次实际产出独立判定为 only_plan / needs_review / blocked，不得因历史判定是 done 而强行维持 done。\n`;
     }
   } catch (e) {
     // Best-effort: a missing task / prior record must never block the verdict.
@@ -1186,7 +1188,7 @@ ${priorVerdictContext}
       // SDK's cache_control-on-middle-block bug that the preset path triggers
       // when combined with a user prompt (API 400 "Extra inputs are not
       // permitted, cache_control").
-      systemPrompt: '你是 Lovdex Operator，一个负责评估任务完成度的助手。你只能调用 lovdex-operator 工具集（list_tasks/get_task/get_session_transcript/write_task_summary 等）。不要试图编辑代码或运行 shell——这些工具不可用。判定完成度时以 get_session_transcript 的 finalOutput（最终输出，即最后一条 assistant 消息）为第一依据，并参考整段 transcript 佐证，同时权衡三方面：实际产出质量（根因定位/真实改动/交付物落地）、验证结果（单测/E2E/构建是否通过）、是否真正收尾（剩余事项是 Agent 例行收尾如提交推送合入部署，还是必须用户决策）。按 Lovdex 用户偏好，提交推送合入 main 是 Agent 的例行职责，不算用户决策门。判定规则：实际改动已落地+验证通过+仅差例行收尾（含礼貌性问「要我提交并推送吗？」「还需要我做什么吗？」）→ done；实际改动已落地+验证通过+剩余事项确需用户决策 → needs_review；只给计划无改动 → only_plan；产出错误/验证失败/卡死/需用户介入 → blocked。仅凭最终输出以问句结尾不足以判 needs_review/blocked——工作实质完成且验证通过时，礼貌性收尾提问应判 done。但注意：如果该任务此前已被判定完成（用户 prompt 中会给出现成判定记录），而本次会话末尾的追加工作与主任务无关（例如用户继续聊别的事），应保持 done，不要因追加工作的最终输出把已完成的旧任务降级为 needs_review/blocked——仅当追加工作明确表明主任务交付物仍未完成或被破坏时才降级。',
+      systemPrompt: '你是 Lovdex Operator，一个负责评估任务完成度的助手。你只能调用 lovdex-operator 工具集（list_tasks/get_task/get_session_transcript/write_task_summary 等）。不要试图编辑代码或运行 shell——这些工具不可用。判定完成度时以 get_session_transcript 的 finalOutput（最终输出，即最后一条 assistant 消息）为第一依据，并参考整段 transcript 佐证，同时权衡三方面：实际产出质量（根因定位/真实改动/交付物落地）、验证结果（单测/E2E/构建是否通过）、是否真正收尾（剩余事项是 Agent 例行收尾如提交推送合入部署，还是必须用户决策）。按 Lovdex 用户偏好，提交推送合入 main 是 Agent 的例行职责，不算用户决策门。判定规则：实际改动已落地+验证通过+仅差例行收尾（含礼貌性问「要我提交并推送吗？」「还需要我做什么吗？」）→ done；实际改动已落地+验证通过+剩余事项确需用户决策 → needs_review；只给计划无改动 → only_plan；产出错误/验证失败/卡死/需用户介入 → blocked。仅凭最终输出以问句结尾不足以判 needs_review/blocked——工作实质完成且验证通过时，礼貌性收尾提问应判 done。但注意：如果该任务此前已被判定完成（用户 prompt 中会给出现成判定记录），此前的判定只是弱参考——若本次追加工作与主任务无关且追加工作本身也已完整收尾，可维持 done，不因追加工作的存在而降级；若追加工作仍停留在计划/方案、代码未实现、或停在等 review/等用户决策，则按本次实际产出独立判定（only_plan/needs_review/blocked），不得被历史判定强行压成 done。',
       settingSources: ['project', 'user', 'local'],
     };
 

@@ -252,7 +252,7 @@ test('default verdict prompt reserves needs_review for genuine user-decision pen
   assert.ok(/选方案|业务方向|授权|必须用户.*决策/.test(prompt), 'prompt should describe genuine user-decision cases for needs_review');
 });
 
-test('runOperatorHeadless injects prior-verdict context when the task was already judged', async () => {
+test('runOperatorHeadless prior-verdict context: unrelated AND fully-wrapped appended work may keep done', async () => {
   let captured: { prompt?: unknown; options?: Record<string, unknown> } = {};
   const queryFn = (params: { prompt: unknown; options: Record<string, unknown> }) => {
     captured = params;
@@ -287,7 +287,61 @@ test('runOperatorHeadless injects prior-verdict context when the task was alread
 
   const prompt = String(captured.prompt);
   assert.ok(prompt.includes('此前已被 AI 判定'), `prompt should mention the prior verdict: ${prompt}`);
-  assert.ok(prompt.includes('保持 done'), 'prompt should instruct keeping done for unrelated follow-up');
+  // keeping done survives only when the appended work is BOTH unrelated AND itself complete
+  assert.ok(/追加工作.*无关.*收尾|无关.*追加工作.*收尾/.test(prompt), 'prompt should tie keeping done to unrelated + complete appended work');
+  assert.ok(/可维持 done|维持 done/.test(prompt), 'prompt should preserve the ability to keep done for unrelated complete follow-up');
+
+  const options = captured.options!;
+  const sys = String(options.systemPrompt ?? '');
+  assert.ok(/无关.*收尾.*可维持 done|可维持 done.*无关/.test(sys), 'systemPrompt should also allow keeping done for unrelated complete follow-up');
+});
+
+test('runOperatorHeadless prior-verdict context is a weak reference: plan-only / waiting-review appended work must not be kept done', async () => {
+  // Regression: case 47d1fdff — a security task already judged done receives an
+  // appended request (change password) that is only a spec with no code landed,
+  // and the session pauses waiting for review. The old prompt made the done prior
+  // a strong bias ("追加工作与主任务无关 → 保持 done"), so the verdict stayed
+  // done instead of judging the actual output (only_plan / needs_review / blocked).
+  let captured: { prompt?: unknown; options?: Record<string, unknown> } = {};
+  const queryFn = (params: { prompt: unknown; options: Record<string, unknown> }) => {
+    captured = params;
+    return emptyIterable();
+  };
+
+  const deps = {
+    ...fakeDeps(),
+    tasks: {
+      ...fakeTasks(),
+      getTask: () => ({ task_id: 'task-456', ai_summary: '已完成登录', verdict_at: '2026-08-12T00:00:00Z' }),
+    },
+  };
+
+  await runOperatorHeadless({
+    sessionId: 'sess-123',
+    taskId: 'task-456',
+    title: 'Implement login',
+    queryFn: queryFn as never,
+    deps: deps as never,
+    config: {
+      enabled: true,
+      auto_verdict_enabled: true,
+      model: '',
+      workspace: '/tmp/op',
+      max_concurrent: 1,
+      verdict_prompt_override: null,
+      interactive_chat_enabled: true,
+    },
+  });
+
+  const prompt = String(captured.prompt);
+  assert.ok(prompt.includes('弱参考'), 'prompt should mark the prior verdict as a weak reference');
+  assert.ok(/only_plan|needs_review|blocked/.test(prompt), 'prompt should keep only_plan/needs_review/blocked reachable despite a done prior');
+  assert.ok(/追加工作.*计划|等 review|只有 spec|未实现|代码未写|没有落地/.test(prompt), 'prompt should explicitly name plan-only / unimplemented / waiting-review appended work as independently judged');
+  assert.ok(/独立评审|不得.*done|历史.*done|强行.*done/.test(prompt), 'prompt must forbid the history prior from forcing done on incomplete appended work');
+
+  const options = captured.options!;
+  const sys = String(options.systemPrompt ?? '');
+  assert.ok(sys.includes('弱参考'), 'systemPrompt should also treat the prior verdict as a weak reference');
 });
 
 test('runOperatorHeadless swallows query failures (logs, does not throw)', async () => {
