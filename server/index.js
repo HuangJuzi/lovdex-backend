@@ -11,6 +11,7 @@ import express from 'express';
 import cors from 'cors';
 import mime from 'mime-types';
 import Database from 'better-sqlite3';
+import * as pty from 'node-pty';
 
 import { AppError, WORKSPACES_ROOT, validateWorkspacePath } from '@/shared/utils.js';
 import { closeSessionsWatcher, initializeSessionsWatcher } from '@/modules/providers/index.js';
@@ -110,6 +111,11 @@ const wss = createWebSocketServer(server, {
         },
         resolveToolApproval,
         getPendingApprovalsForSession,
+    },
+    terminal: {
+        spawnPty: (shell, args, options) => pty.spawn(shell, args, options),
+        shell: process.env.SHELL || '/bin/bash',
+        cwd: WORKSPACES_ROOT,
     },
 });
 

@@ -3,12 +3,14 @@ import type { Server as HttpServer } from 'node:http';
 import { WebSocketServer, type WebSocket, type VerifyClientCallbackSync } from 'ws';
 
 import { handleChatConnection } from '@/modules/websocket/services/chat-websocket.service.js';
+import { handleTerminalConnection } from '@/modules/terminal/index.js';
 import { verifyWebSocketClient } from '@/modules/websocket/services/websocket-auth.service.js';
 import type { AuthenticatedWebSocketRequest } from '@/shared/types.js';
 
 type WebSocketServerDependencies = {
   verifyClient: Parameters<typeof verifyWebSocketClient>[1];
   chat: Parameters<typeof handleChatConnection>[2];
+  terminal: Parameters<typeof handleTerminalConnection>[2];
 };
 
 /**
@@ -66,6 +68,11 @@ export function createWebSocketServer(
 
     if (pathname === '/ws') {
       handleChatConnection(ws, incomingRequest, dependencies.chat);
+      return;
+    }
+
+    if (pathname === '/ws/terminal') {
+      handleTerminalConnection(ws, incomingRequest, dependencies.terminal);
       return;
     }
 
