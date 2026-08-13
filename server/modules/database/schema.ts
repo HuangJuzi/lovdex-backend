@@ -160,7 +160,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     is_operator       INTEGER DEFAULT 0,
     label             TEXT NOT NULL DEFAULT 'other'
                       ${LABEL_CHECK},
-    remark            TEXT
+    remark            TEXT,
+    source_schedule_id TEXT
 );
 `;
 

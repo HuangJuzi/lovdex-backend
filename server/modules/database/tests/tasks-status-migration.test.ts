@@ -140,12 +140,12 @@ test('migrateTasksTable adds priority/deadline/is_operator/label/remark', async 
   try {
     const db = getConnection();
     const cols = (db.prepare('PRAGMA table_info(tasks)').all() as { name: string }[]).map((c) => c.name);
-    for (const col of ['priority', 'deadline', 'is_operator', 'label', 'remark']) {
+    for (const col of ['priority', 'deadline', 'is_operator', 'label', 'remark', 'source_schedule_id']) {
       assert.ok(cols.includes(col), `missing column ${col}`);
     }
     const row = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'").get() as { sql: string };
     assert.match(row.sql, /CHECK \(priority IN \('P0','P1','P2','P3'\)\)/);
-    assert.match(row.sql, /CHECK \(label IN \('bug','feature','optimization','refactor','docs','other'\)\)/);
+    assert.match(row.sql, /CHECK \(label IN \('bug','feature','optimization','refactor','docs','other','reminder'\)\)/);
   } finally {
     closeConnection();
     if (previousDatabasePath === undefined) delete process.env.DATABASE_PATH;
@@ -183,8 +183,9 @@ test('migrateTasksTable adds columns in-place on sub_status-present table (no re
     const db = getConnection();
 
     // All five columns present (added in place via ALTER TABLE ADD COLUMN)
+    // plus source_schedule_id (present via the schema's current shape).
     const cols = (db.prepare('PRAGMA table_info(tasks)').all() as { name: string }[]).map((c) => c.name);
-    for (const col of ['priority', 'deadline', 'is_operator', 'label', 'remark']) {
+    for (const col of ['priority', 'deadline', 'is_operator', 'label', 'remark', 'source_schedule_id']) {
       assert.ok(cols.includes(col), `missing column ${col}`);
     }
     // No rebuild happened: the table keeps its inline sub_status shape (no standalone verdict column added back)
@@ -244,6 +245,7 @@ test('fresh install creates tasks table with sub_status and no verdict column', 
     const db = getConnection();
     const cols = db.prepare('PRAGMA table_info(tasks)').all() as { name: string }[];
     assert.ok(cols.some((c) => c.name === 'sub_status'));
+    assert.ok(cols.some((c) => c.name === 'source_schedule_id'));
     assert.ok(!cols.some((c) => c.name === 'verdict'), 'verdict column must not exist on fresh installs');
   } finally {
     closeConnection();
