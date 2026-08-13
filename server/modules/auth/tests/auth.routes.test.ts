@@ -140,3 +140,18 @@ test('change-password requires a valid token', async () => {
     assert.equal(res.status, 401);
   });
 });
+
+test('change-password returns 404 when auth is disabled (open mode)', async () => {
+  const original = process.env.AUTH_ENABLED;
+  try {
+    process.env.AUTH_ENABLED = 'false';
+    await withServer(async (base) => {
+      const token = signToken({ sub: 1, username: authConfig.email });
+      const res = await changePassword(base, { token, body: { currentCode: 'x', newCode: 'yyyy' } });
+      assert.equal(res.status, 404);
+    });
+  } finally {
+    if (original === undefined) delete process.env.AUTH_ENABLED;
+    else process.env.AUTH_ENABLED = original;
+  }
+});

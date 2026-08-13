@@ -44,7 +44,7 @@ router.get('/me', (req, res) => {
 router.post('/change-password', authenticateToken, (req, res) => {
   if (!isAuthEnabled()) {
     // Open / platform mode has no password gate — nothing to change.
-    return res.status(404).json({ error: 'Not found' });
+    return res.status(404).json({ error: '登录未开启，无法修改密码' });
   }
   const { currentCode, newCode } = (req.body ?? {}) as {
     currentCode?: unknown;
