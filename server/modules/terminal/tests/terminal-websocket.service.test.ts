@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import test from 'node:test';
 
 import type { WebSocket } from 'ws';
@@ -67,6 +68,64 @@ test('spawns a PTY with the configured shell and cwd', () => {
     args: [],
     options: { cwd: '/workspace', cols: 80, rows: 24, env: { ...process.env, TERM: 'xterm-256color' } },
   });
+});
+
+test('spawns in a requested cwd when it is an existing directory inside the workspace root', () => {
+  const root = path.resolve(process.cwd(), '..');
+  const target = process.cwd();
+  const pty = makeFakePty();
+  let captured: unknown = null;
+  const ws = makeFakeWs();
+  const request = { url: `/ws/terminal?cwd=${encodeURIComponent(target)}` } as AuthenticatedWebSocketRequest;
+  handleTerminalConnection(asSocket(ws), request, {
+    spawnPty: (shell, args, options) => { captured = { shell, args, options }; return pty; },
+    shell: '/bin/bash',
+    cwd: root,
+  });
+  assert.equal((captured as { options: { cwd: string } }).options.cwd, target);
+});
+
+test('falls back to the workspace root when the requested cwd is outside it', () => {
+  const root = path.resolve(process.cwd(), '..');
+  const pty = makeFakePty();
+  let captured: unknown = null;
+  const ws = makeFakeWs();
+  const request = { url: '/ws/terminal?cwd=%2Fetc' } as AuthenticatedWebSocketRequest;
+  handleTerminalConnection(asSocket(ws), request, {
+    spawnPty: (shell, args, options) => { captured = { shell, args, options }; return pty; },
+    shell: '/bin/bash',
+    cwd: root,
+  });
+  assert.equal((captured as { options: { cwd: string } }).options.cwd, root);
+});
+
+test('falls back to the workspace root when the requested cwd is not a directory', () => {
+  const root = process.cwd();
+  const missing = path.join(root, 'definitely-not-a-real-dir');
+  const pty = makeFakePty();
+  let captured: unknown = null;
+  const ws = makeFakeWs();
+  const request = { url: `/ws/terminal?cwd=${encodeURIComponent(missing)}` } as AuthenticatedWebSocketRequest;
+  handleTerminalConnection(asSocket(ws), request, {
+    spawnPty: (shell, args, options) => { captured = { shell, args, options }; return pty; },
+    shell: '/bin/bash',
+    cwd: root,
+  });
+  assert.equal((captured as { options: { cwd: string } }).options.cwd, root);
+});
+
+test('falls back to the workspace root when no cwd is requested', () => {
+  const root = process.cwd();
+  const pty = makeFakePty();
+  let captured: unknown = null;
+  const ws = makeFakeWs();
+  const request = { url: '/ws/terminal' } as AuthenticatedWebSocketRequest;
+  handleTerminalConnection(asSocket(ws), request, {
+    spawnPty: (shell, args, options) => { captured = { shell, args, options }; return pty; },
+    shell: '/bin/bash',
+    cwd: root,
+  });
+  assert.equal((captured as { options: { cwd: string } }).options.cwd, root);
 });
 
 test('forwards input messages to the pty', () => {

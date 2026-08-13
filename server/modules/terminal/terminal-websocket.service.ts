@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import path from 'node:path';
+
 import type { WebSocket } from 'ws';
 
 import type { AuthenticatedWebSocketRequest } from '@/shared/types.js';
@@ -49,19 +52,50 @@ function send(ws: WebSocket, payload: unknown): void {
 }
 
 /**
+ * Resolves the starting directory for a terminal session.
+ *
+ * The client may request a project directory via `?cwd=` on the upgrade URL;
+ * it is honored only when it is an existing directory inside `workspaceRoot`
+ * (lexical containment, matching the workspace model used elsewhere). Anything
+ * else — missing, malformed, outside the root, or not a directory — falls back
+ * to the root so a bad request can never land the shell in an unexpected place.
+ */
+export function resolveTerminalCwd(rawUrl: string | undefined, workspaceRoot: string): string {
+  let requested: string | null = null;
+  try {
+    requested = new URL(rawUrl ?? '/', 'http://localhost').searchParams.get('cwd');
+  } catch {
+    return workspaceRoot;
+  }
+  if (!requested) return workspaceRoot;
+
+  try {
+    const absolute = path.resolve(requested);
+    const root = path.resolve(workspaceRoot);
+    const normalizedRoot = root.endsWith(path.sep) ? root : `${root}${path.sep}`;
+    const withinRoot = absolute === root || absolute.startsWith(normalizedRoot);
+    if (!withinRoot) return workspaceRoot;
+    if (!fs.existsSync(absolute) || !fs.statSync(absolute).isDirectory()) return workspaceRoot;
+    return absolute;
+  } catch {
+    return workspaceRoot;
+  }
+}
+
+/**
  * Handles a single /ws/terminal connection: spawns one PTY, pipes the client's
  * input/resize frames into it and its output back out. Closing the socket kills
  * the PTY; PTY exit closes the socket.
  */
 export function handleTerminalConnection(
   ws: WebSocket,
-  _request: AuthenticatedWebSocketRequest,
+  request: AuthenticatedWebSocketRequest,
   dependencies: TerminalDependencies,
 ): void {
   let pty: PtyLike;
   try {
     pty = dependencies.spawnPty(dependencies.shell, [], {
-      cwd: dependencies.cwd,
+      cwd: resolveTerminalCwd(request.url, dependencies.cwd),
       cols: INITIAL_COLS,
       rows: INITIAL_ROWS,
       env: { ...(process.env as Record<string, string>), TERM: 'xterm-256color' },
