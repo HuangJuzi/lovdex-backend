@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * LovdexCLI CLI
+ * Lovdex CLI
  *
- * Provides command-line utilities for managing LovdexCLI
+ * Provides command-line utilities for managing Lovdex
  *
  * Commands:
  *   (no args)     - Start the server (default)
@@ -90,7 +90,7 @@ function getInstallDir() {
 
 // Show status command
 function showStatus() {
-    console.log(`\n${c.bright('LovdexCLI UI - Status')}\n`);
+    console.log(`\n${c.bright('Lovdex UI - Status')}\n`);
     console.log(c.dim('═'.repeat(60)));
 
     // Version info
@@ -147,7 +147,7 @@ function showStatus() {
 function showHelp() {
     console.log(`
 ╔═══════════════════════════════════════════════════════════════╗
-║              LovdexCLI - Command Line Tool               ║
+║                  Lovdex - Command Line Tool                   ║
 ╚═══════════════════════════════════════════════════════════════╝
 
 Usage:
@@ -155,7 +155,7 @@ Usage:
   cloudcli [command] [options]
 
 Commands:
-  start            Start the LovdexCLI server (default)
+  start            Start the Lovdex server (default)
   sandbox          Manage Docker sandbox environments
   browser-use-mcp  Run the Browser MCP stdio server
   status           Show configuration and data locations
@@ -320,7 +320,7 @@ function parseSandboxArgs(args) {
 
 function showSandboxHelp() {
     console.log(`
-${c.bright('LovdexCLI Sandbox')} — Run LovdexCLI inside Docker Sandboxes
+${c.bright('Lovdex Sandbox')} — Run Lovdex inside Docker Sandboxes
 
 Usage:
   cloudcli sandbox <workspace>            Create and start a sandbox
@@ -332,7 +332,7 @@ Subcommands:
   ${c.bright('start')}        Restart a stopped sandbox and re-launch the web UI
   ${c.bright('stop')}         Stop a sandbox (preserves state)
   ${c.bright('rm')}           Remove a sandbox
-  ${c.bright('logs')}         Show LovdexCLI server logs
+  ${c.bright('logs')}         Show Lovdex server logs
   ${c.bright('help')}         Show this help
 
 Options:
@@ -453,7 +453,7 @@ async function sandboxCommand(args) {
             restartRun.unref();
             await new Promise(resolve => setTimeout(resolve, 5000));
 
-            console.log(`${c.info('▶')} Launching LovdexCLI web server...`);
+            console.log(`${c.info('▶')} Launching Lovdex web server...`);
             sbx(['exec', opts.name, 'bash', '-c', 'nohup cloudcli start --port 3001 > /tmp/cloudcli-ui.log 2>&1 & disown']);
 
             console.log(`${c.info('▶')} Forwarding port ${opts.port} → 3001...`);
@@ -476,7 +476,7 @@ async function sandboxCommand(args) {
                 }
             }
 
-            console.log(`\n${c.ok('✔')} ${c.bright('LovdexCLI is ready!')}`);
+            console.log(`\n${c.ok('✔')} ${c.bright('Lovdex is ready!')}`);
             console.log(`  ${c.info('→')} ${c.bright(`http://localhost:${opts.port}`)}\n`);
             break;
         }
@@ -509,7 +509,7 @@ async function sandboxCommand(args) {
                 }
             } catch { /* sbx secret ls not available, skip check */ }
 
-            console.log(`\n${c.bright('LovdexCLI Sandbox')}`);
+            console.log(`\n${c.bright('Lovdex Sandbox')}`);
             console.log(c.dim('─'.repeat(50)));
             console.log(`  Agent:     ${c.info(opts.agent)} ${c.dim(`(${secret} credentials)`)}`);
             console.log(`  Workspace: ${c.dim(workspace)}`);
@@ -551,8 +551,8 @@ async function sandboxCommand(args) {
                 }
             }
 
-            // Step 3: Start LovdexCLI inside the sandbox
-            console.log(`${c.info('▶')} Launching LovdexCLI web server...`);
+            // Step 3: Start Lovdex inside the sandbox
+            console.log(`${c.info('▶')} Launching Lovdex web server...`);
             sbx(['exec', opts.name, 'bash', '-c', 'nohup cloudcli start --port 3001 > /tmp/cloudcli-ui.log 2>&1 & disown']);
 
             // Step 4: Forward port
@@ -577,7 +577,7 @@ async function sandboxCommand(args) {
             }
 
             // Done
-            console.log(`\n${c.ok('✔')} ${c.bright('LovdexCLI is ready!')}`);
+            console.log(`\n${c.ok('✔')} ${c.bright('Lovdex is ready!')}`);
             console.log(`  ${c.info('→')} Open ${c.bright(`http://localhost:${opts.port}`)}`);
             console.log(`\n${c.dim('  Manage with:')}`);
             console.log(`  ${c.dim('$')} sbx ls`);
