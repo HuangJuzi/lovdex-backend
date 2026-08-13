@@ -164,6 +164,35 @@ CREATE TABLE IF NOT EXISTS tasks (
 );
 `;
 
+export const SCHEDULED_TASKS_TABLE_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS scheduled_tasks (
+    schedule_id       TEXT PRIMARY KEY NOT NULL,
+    title             TEXT NOT NULL,
+    description       TEXT,
+    project_path      TEXT,
+    executor_provider TEXT NOT NULL DEFAULT 'claude',
+    executor_model    TEXT,
+    priority          TEXT NOT NULL DEFAULT 'P2'
+                      CHECK (priority IN ('P0','P1','P2','P3')),
+    label             TEXT NOT NULL DEFAULT 'other'
+                      CHECK (label IN ('bug','feature','optimization','refactor','docs','other','reminder')),
+    is_operator       INTEGER DEFAULT 0,
+    auto_run          INTEGER DEFAULT 1,
+    schedule_type     TEXT NOT NULL CHECK (schedule_type IN ('once','interval','cron')),
+    cron_expr         TEXT,
+    interval_seconds  INTEGER,
+    run_at            DATETIME,
+    timezone          TEXT DEFAULT 'local',
+    next_run_at       DATETIME NOT NULL,
+    last_run_at       DATETIME,
+    last_task_id      TEXT,
+    enabled           INTEGER DEFAULT 1,
+    created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_next_run ON scheduled_tasks(enabled, next_run_at);
+`;
+
 export const LAST_SCANNED_AT_SQL = `
 CREATE TABLE IF NOT EXISTS scan_state (
   id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -222,6 +251,8 @@ CREATE INDEX IF NOT EXISTS idx_session_ids_lookup ON sessions(session_id);
 ${TASKS_TABLE_SCHEMA_SQL}
 CREATE INDEX IF NOT EXISTS idx_tasks_project_status ON tasks(project_path, status);
 CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_id);
+
+${SCHEDULED_TASKS_TABLE_SCHEMA_SQL}
 
 ${LAST_SCANNED_AT_SQL}
 
