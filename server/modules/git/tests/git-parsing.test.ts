@@ -32,6 +32,17 @@ test('parseGitStatusOutput ignores short/empty entries', () => {
   assert.deepEqual(result, { modified: [], added: [], deleted: [], untracked: [], staged: [] });
 });
 
+test('parseGitStatusOutput handles a rename (two NUL records)', () => {
+  // porcelain -z emits `R  old`\0`new`\0`; the second record is the new path,
+  // which the parser skips while bucketing the source path.
+  const output = 'R  old.txt\0renamed.txt\0';
+  const result = parseGitStatusOutput(output);
+  assert.ok(result.staged.includes('old.txt'));
+  assert.ok(result.modified.includes('old.txt'));
+  assert.ok(!result.staged.includes('renamed.txt'));
+  assert.ok(!result.untracked.includes('renamed.txt'));
+});
+
 test('parseGitLogWithStats parses separated log lines with shortstat', () => {
   const US = '';
   // Format: %H%x1f%P%x1f%D%x1f%an%x1f%ae%x1f%ad%x1f%s
