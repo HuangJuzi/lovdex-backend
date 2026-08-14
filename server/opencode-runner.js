@@ -1,19 +1,19 @@
 /**
- * Sophcode CLI Integration
+ * OpenCode CLI Integration
  * =========================
  *
- * Drives the `sophcode` binary (an opencode fork) in non-interactive
+ * Drives the `opencode` binary (an opencode fork) in non-interactive
  * `run --format json` mode. This is the first CLI-based provider runtime in
- * lovdex — claude/codex use official SDKs, but sophcode has no SDK, so the
+ * lovdex — claude/codex use official SDKs, but opencode has no SDK, so the
  * runner spawns the CLI and parses its NDJSON event stream
  * (`step_start` / `text` / `step_finish`).
  *
  * ## Usage
  *
- * - querySophcode(command, options, ws) - Execute a prompt with streaming via WebSocket
- * - abortSophcodeSession(sessionId) - Cancel an active session
- * - isSophcodeSessionActive(sessionId) - Check if a session is running
- * - getActiveSophcodeSessions() - List all active sessions
+ * - queryOpenCode(command, options, ws) - Execute a prompt with streaming via WebSocket
+ * - abortOpenCodeSession(sessionId) - Cancel an active session
+ * - isOpenCodeSessionActive(sessionId) - Check if a session is running
+ * - getActiveOpenCodeSessions() - List all active sessions
  */
 
 import os from 'node:os';
@@ -27,13 +27,13 @@ import { notifyRunFailed, notifyRunStopped } from './services/notification-orche
 import { providerAuthService } from './modules/providers/services/provider-auth.service.js';
 import { createCompleteMessage, createNormalizedMessage } from './shared/utils.js';
 
-const activeSophcodeProcesses = new Map();
+const activeOpenCodeProcesses = new Map();
 
 /**
- * Maps the UI permission mode onto sophcode's non-interactive controls.
+ * Maps the UI permission mode onto opencode's non-interactive controls.
  *
- * sophcode (opencode fork) has no single "permission mode" flag; each mode
- * uses a different lever of the `sophcode run` CLI:
+ * opencode (opencode fork) has no single "permission mode" flag; each mode
+ * uses a different lever of the `opencode run` CLI:
  * - plan              → the built-in read-only `plan` agent (`--agent plan`).
  * - bypassPermissions → `--auto`, which auto-approves every permission that
  *                       is not explicitly denied in the user's config.
@@ -45,7 +45,7 @@ const activeSophcodeProcesses = new Map();
  *
  * Exported for tests.
  */
-export function resolveSophcodePermissionOptions(permissionMode) {
+export function resolveOpenCodePermissionOptions(permissionMode) {
   switch (permissionMode) {
     case 'plan':
       return { args: ['--agent', 'plan'], env: {} };
@@ -59,7 +59,7 @@ export function resolveSophcodePermissionOptions(permissionMode) {
 }
 
 /**
- * Resolves the working directory to hand to a `sophcode run` invocation.
+ * Resolves the working directory to hand to a `opencode run` invocation.
  *
  * A session's transcript directory lives in opencode.db (`directory`, with
  * `path` as the git-relative fallback for older rows). When the caller does not
@@ -69,7 +69,7 @@ export function resolveSophcodePermissionOptions(permissionMode) {
  * recorded directory keeps existing sessions resumable without waiting on a
  * re-sync. Exported for tests.
  */
-export function resolveSophcodeCwd(providerSessionId, cwd) {
+export function resolveOpenCodeCwd(providerSessionId, cwd) {
   const explicitCwd = cwd && String(cwd).trim() ? String(cwd).trim() : '';
   if (explicitCwd) {
     return explicitCwd;
@@ -93,13 +93,13 @@ export function resolveSophcodeCwd(providerSessionId, cwd) {
 }
 
 /**
- * Parses one NDJSON event line from `sophcode run --format json` and returns
+ * Parses one NDJSON event line from `opencode run --format json` and returns
  * the normalized messages it maps to (may be empty). `state` tracks the
  * captured session id and per-message accumulated text for delta streaming.
  *
  * Exported for tests.
  */
-export function parseSophcodeJsonLine(line, state) {
+export function parseOpenCodeJsonLine(line, state) {
   let event;
   try {
     event = JSON.parse(line);
@@ -131,7 +131,7 @@ export function parseSophcodeJsonLine(line, state) {
         kind: 'stream_delta',
         content: delta,
         sessionId,
-        provider: 'sophcode',
+        provider: 'opencode',
       }));
     }
     state.textByMessage.set(key, text);
@@ -140,7 +140,7 @@ export function parseSophcodeJsonLine(line, state) {
   if (event.type === 'step_finish') {
     const key = part?.messageID || part?.id;
     if (key && state.textByMessage.has(key)) {
-      messages.push(createNormalizedMessage({ kind: 'stream_end', sessionId, provider: 'sophcode' }));
+      messages.push(createNormalizedMessage({ kind: 'stream_end', sessionId, provider: 'opencode' }));
       state.textByMessage.delete(key);
     }
     if (part?.tokens) {
@@ -158,7 +158,7 @@ export function parseSophcodeJsonLine(line, state) {
           breakdown: { input, output },
         },
         sessionId,
-        provider: 'sophcode',
+        provider: 'opencode',
       }));
     }
   }
@@ -170,11 +170,40 @@ function sendMessage(ws, data) {
   try {
     ws.send(data);
   } catch (error) {
-    console.error('[sophcode-runner] send failed', error.message || error);
+    console.error('[opencode-runner] send failed', error.message || error);
   }
 }
 
-export async function querySophcode(command, options = {}, ws) {
+/**
+ * Detects whether a real `opencode` binary is on PATH. This is the live probe
+ * behind `resolveOpenCodeBinary` when neither `options.bin` nor the
+ * `OPENCODE_BIN` env var is set. Exported for tests.
+ */
+export function probeOpenCodeInstalled() {
+  try {
+    const r = spawn.sync('opencode', ['--version'], { stdio: 'ignore', timeout: 5000 });
+    return !r.error && r.status === 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Resolves which CLI binary `queryOpenCode` should spawn. Priority:
+ * `options.bin` > `OPENCODE_BIN` env > live `opencode` PATH probe > the
+ * `sophcode` fork (kept as a fallback so machines that only carry the local
+ * opencode fork keep working). Exported for tests.
+ */
+export function resolveOpenCodeBinary(opts = {}) {
+  const envBin = opts.bin !== undefined ? opts.bin : process.env.OPENCODE_BIN;
+  if (envBin && envBin.trim()) {
+    return envBin.trim();
+  }
+  const available = opts.opencodeAvailable !== undefined ? opts.opencodeAvailable : probeOpenCodeInstalled();
+  return available ? 'opencode' : 'sophcode';
+}
+
+export async function queryOpenCode(command, options = {}, ws) {
   const {
     sessionId = null,
     model,
@@ -190,7 +219,7 @@ export async function querySophcode(command, options = {}, ws) {
   let completeSent = false;
   let terminalFailure = null;
 
-  const resolvedCwd = resolveSophcodeCwd(capturedSessionId || sessionId, cwd);
+  const resolvedCwd = resolveOpenCodeCwd(capturedSessionId || sessionId, cwd);
   const args = ['run', '--format', 'json', '--dir', resolvedCwd];
   if (capturedSessionId) {
     args.push('--session', capturedSessionId);
@@ -201,7 +230,7 @@ export async function querySophcode(command, options = {}, ws) {
   if (effort && effort !== 'default') {
     args.push('--variant', effort);
   }
-  const permissionOptions = resolveSophcodePermissionOptions(permissionMode);
+  const permissionOptions = resolveOpenCodePermissionOptions(permissionMode);
   args.push(...permissionOptions.args);
 
   const hasAttachments = normalizeImageDescriptors(images).length > 0;
@@ -213,13 +242,13 @@ export async function querySophcode(command, options = {}, ws) {
   }
 
   const processKey = capturedSessionId || `new-${Date.now()}`;
-  const child = spawn('sophcode', args, {
+  const child = spawn(resolveOpenCodeBinary(), args, {
     cwd: resolvedCwd,
     stdio: ['pipe', 'pipe', 'pipe'],
     env: { ...process.env, ...permissionOptions.env },
   });
 
-  activeSophcodeProcesses.set(processKey, child);
+  activeOpenCodeProcesses.set(processKey, child);
   child.sessionKey = processKey;
   child.stdin.end();
 
@@ -238,11 +267,11 @@ export async function querySophcode(command, options = {}, ws) {
       if (!line.trim()) {
         continue;
       }
-      const events = parseSophcodeJsonLine(line, state);
+      const events = parseOpenCodeJsonLine(line, state);
       if (state.sessionId && !capturedSessionId) {
         capturedSessionId = state.sessionId;
-        activeSophcodeProcesses.set(capturedSessionId, child);
-        activeSophcodeProcesses.delete(processKey);
+        activeOpenCodeProcesses.set(capturedSessionId, child);
+        activeOpenCodeProcesses.delete(processKey);
         if (typeof ws.setSessionId === 'function') {
           ws.setSessionId(capturedSessionId);
         }
@@ -252,7 +281,7 @@ export async function querySophcode(command, options = {}, ws) {
             kind: 'session_created',
             newSessionId: capturedSessionId,
             sessionId: capturedSessionId,
-            provider: 'sophcode',
+            provider: 'opencode',
           }));
         }
       }
@@ -270,39 +299,39 @@ export async function querySophcode(command, options = {}, ws) {
         kind: 'error',
         content: text,
         sessionId: capturedSessionId || sessionId || null,
-        provider: 'sophcode',
+        provider: 'opencode',
       }));
     }
   });
 
   return new Promise((resolve, reject) => {
     child.on('error', async (error) => {
-      console.error('[sophcode-runner] spawn error', error.message);
-      const installed = await providerAuthService.isProviderInstalled('sophcode');
+      console.error('[opencode-runner] spawn error', error.message);
+      const installed = await providerAuthService.isProviderInstalled('opencode');
       const errorContent = !installed
-        ? 'Sophcode CLI is not installed. Install it from https://opencode.ai/docs/'
+        ? 'OpenCode CLI is not installed. Install it from https://opencode.ai/docs/'
         : error.message;
       sendMessage(ws, createNormalizedMessage({
         kind: 'error',
         content: errorContent,
         sessionId: capturedSessionId || sessionId || null,
-        provider: 'sophcode',
+        provider: 'opencode',
       }));
       if (!completeSent) {
         completeSent = true;
-        sendMessage(ws, createCompleteMessage({ provider: 'sophcode', sessionId: capturedSessionId || sessionId || null, exitCode: 1 }));
+        sendMessage(ws, createCompleteMessage({ provider: 'opencode', sessionId: capturedSessionId || sessionId || null, exitCode: 1 }));
       }
       reject(error);
     });
 
     child.on('close', (code) => {
-      activeSophcodeProcesses.delete(processKey);
+      activeOpenCodeProcesses.delete(processKey);
       if (capturedSessionId) {
-        activeSophcodeProcesses.delete(capturedSessionId);
+        activeOpenCodeProcesses.delete(capturedSessionId);
       }
 
       if (lineBuffer.trim()) {
-        const events = parseSophcodeJsonLine(lineBuffer.trim(), state);
+        const events = parseOpenCodeJsonLine(lineBuffer.trim(), state);
         for (const msg of events) {
           emit(msg);
         }
@@ -311,7 +340,7 @@ export async function querySophcode(command, options = {}, ws) {
       if (!completeSent && !child.aborted) {
         completeSent = true;
         sendMessage(ws, createCompleteMessage({
-          provider: 'sophcode',
+          provider: 'opencode',
           sessionId: capturedSessionId || sessionId || null,
           actualSessionId: capturedSessionId || sessionId || null,
           exitCode: code === 0 ? 0 : 1,
@@ -319,7 +348,7 @@ export async function querySophcode(command, options = {}, ws) {
         if (code === 0) {
           notifyRunStopped({
             userId: ws?.userId || null,
-            provider: 'sophcode',
+            provider: 'opencode',
             sessionId: capturedSessionId || sessionId || null,
             stopReason: 'completed',
           });
@@ -331,10 +360,10 @@ export async function querySophcode(command, options = {}, ws) {
         return;
       }
 
-      terminalFailure = new Error(`Sophcode CLI exited with code ${code}`);
+      terminalFailure = new Error(`OpenCode CLI exited with code ${code}`);
       notifyRunFailed({
         userId: ws?.userId || null,
-        provider: 'sophcode',
+        provider: 'opencode',
         sessionId: capturedSessionId || sessionId || null,
         error: terminalFailure,
       });
@@ -344,12 +373,12 @@ export async function querySophcode(command, options = {}, ws) {
 }
 
 /**
- * Aborts an active sophcode run by killing its child process.
+ * Aborts an active opencode run by killing its child process.
  * The abort-session handler emits the terminal `complete` (aborted: true)
  * on behalf of the run, so the close handler skips its own.
  */
-export function abortSophcodeSession(sessionId) {
-  const child = activeSophcodeProcesses.get(sessionId);
+export function abortOpenCodeSession(sessionId) {
+  const child = activeOpenCodeProcesses.get(sessionId);
   if (!child) {
     return false;
   }
@@ -362,10 +391,10 @@ export function abortSophcodeSession(sessionId) {
   return true;
 }
 
-export function isSophcodeSessionActive(sessionId) {
-  return activeSophcodeProcesses.has(sessionId);
+export function isOpenCodeSessionActive(sessionId) {
+  return activeOpenCodeProcesses.has(sessionId);
 }
 
-export function getActiveSophcodeSessions() {
-  return Array.from(activeSophcodeProcesses.keys());
+export function getActiveOpenCodeSessions() {
+  return Array.from(activeOpenCodeProcesses.keys());
 }
