@@ -411,6 +411,36 @@ test('createTask rejects invalid priority / deadline / label', () => {
   assert.throws(() => svc.createTask({ projectPath: '/p', title: 't', label: 'nope' as any }), /invalid label/);
 });
 
+test('createTask forwards sourceScheduleId to the db layer (null when absent)', () => {
+  type CreateInput = Parameters<TaskDbLike['createTask']>[0];
+  const created: CreateInput[] = [];
+  const stubDb = {
+    ...makeDbStub().db,
+    createTask: (input: CreateInput) => {
+      created.push(input);
+      return {
+        task_id: 't2',
+        ...input,
+        source_schedule_id: input.sourceScheduleId ?? null,
+        project_path: input.projectPath,
+        status: input.status ?? 'todo',
+        session_id: input.sessionId ?? null,
+      };
+    },
+  };
+  const svc = createTasksService(stubDb as unknown as TaskDbLike, {
+    broadcast: () => {},
+    deps: { projectsDb: makeProjectStub('/p') },
+  });
+  const withSched = svc.createTask({ projectPath: '/p', title: 'sched', executorProvider: 'claude', sourceScheduleId: 'sched-1' });
+  assert.equal(created[0].sourceScheduleId, 'sched-1');
+  assert.equal(withSched.source_schedule_id, 'sched-1');
+
+  created.length = 0;
+  svc.createTask({ projectPath: '/p', title: 'plain', executorProvider: 'claude' });
+  assert.equal(created[0].sourceScheduleId, null);
+});
+
 test('createTask operator task uses claude + workspace project', () => {
   const created: any[] = [];
   const stubDb = {

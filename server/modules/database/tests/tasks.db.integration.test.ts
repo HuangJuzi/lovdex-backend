@@ -213,6 +213,18 @@ test('createTask persists new fields with defaults', async () => {
   });
 });
 
+test('createTask persists source_schedule_id and getTask round-trips it', async () => {
+  await withIsolatedDatabase(() => {
+    projectsDb.createProjectPath('/p');
+    const scheduled = tasksDb.createTask({ projectPath: '/p', title: 'sched', executorProvider: 'claude', sourceScheduleId: 'sched-1' });
+    assert.equal(scheduled.source_schedule_id, 'sched-1');
+    assert.equal(tasksDb.getTask(scheduled.task_id)?.source_schedule_id, 'sched-1');
+
+    const plain = tasksDb.createTask({ projectPath: '/p', title: 'plain', executorProvider: 'claude' });
+    assert.equal(plain.source_schedule_id, null);
+  });
+});
+
 test('updateTask can set priority/deadline/label/remark', async () => {
   await withIsolatedDatabase(() => {
     projectsDb.createProjectPath('/p');
