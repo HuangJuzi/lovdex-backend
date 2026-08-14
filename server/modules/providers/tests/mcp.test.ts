@@ -170,11 +170,11 @@ test('providerMcpService handles codex MCP TOML config and capability validation
 });
 
 /**
- * This test covers Sophcode (opencode-family) MCP support for user/project config
+ * This test covers OpenCode MCP support for user/project config
  * files, JSONC-compatible reads, and validation for unsupported scope/transport
  * combinations.
  */
-test('providerMcpService handles sophcode MCP config and capability validation', { concurrency: false }, async () => {
+test('providerMcpService handles opencode MCP config and capability validation', { concurrency: false }, async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'llm-mcp-opencode-'));
   const workspacePath = path.join(tempRoot, 'workspace');
   await fs.mkdir(workspacePath, { recursive: true });
@@ -190,7 +190,7 @@ test('providerMcpService handles sophcode MCP config and capability validation',
 
   const restoreHomeDir = patchHomeDir(tempRoot);
   try {
-    await providerMcpService.upsertProviderMcpServer('sophcode', {
+    await providerMcpService.upsertProviderMcpServer('opencode', {
       name: 'opencode-user-stdio',
       scope: 'user',
       transport: 'stdio',
@@ -199,7 +199,7 @@ test('providerMcpService handles sophcode MCP config and capability validation',
       env: { API_KEY: 'x' },
     });
 
-    await providerMcpService.upsertProviderMcpServer('sophcode', {
+    await providerMcpService.upsertProviderMcpServer('opencode', {
       name: 'opencode-project-http',
       scope: 'project',
       transport: 'http',
@@ -221,12 +221,12 @@ test('providerMcpService handles sophcode MCP config and capability validation',
     assert.equal(projectHttp.type, 'remote');
     assert.equal(projectHttp.url, 'https://opencode.example.com/mcp');
 
-    const grouped = await providerMcpService.listProviderMcpServers('sophcode', { workspacePath });
+    const grouped = await providerMcpService.listProviderMcpServers('opencode', { workspacePath });
     assert.ok(grouped.user.some((server) => server.name === 'opencode-user-stdio' && server.transport === 'stdio'));
     assert.ok(grouped.project.some((server) => server.name === 'opencode-project-http' && server.transport === 'http'));
 
     await assert.rejects(
-      providerMcpService.upsertProviderMcpServer('sophcode', {
+      providerMcpService.upsertProviderMcpServer('opencode', {
         name: 'opencode-local',
         scope: 'local',
         transport: 'stdio',
@@ -239,7 +239,7 @@ test('providerMcpService handles sophcode MCP config and capability validation',
     );
 
     await assert.rejects(
-      providerMcpService.upsertProviderMcpServer('sophcode', {
+      providerMcpService.upsertProviderMcpServer('opencode', {
         name: 'opencode-sse',
         scope: 'project',
         transport: 'sse',
@@ -285,8 +285,8 @@ test('providerMcpService global adder writes to all providers and rejects unsupp
     const codexProject = TOML.parse(await fs.readFile(path.join(workspacePath, '.codex', 'config.toml'), 'utf8')) as Record<string, unknown>;
     assert.ok((codexProject.mcp_servers as Record<string, unknown>)['global-http']);
 
-    const sophcodeProject = await readJson(path.join(workspacePath, 'opencode.json'));
-    assert.ok((sophcodeProject.mcp as Record<string, unknown>)['global-http']);
+    const opencodeProject = await readJson(path.join(workspacePath, 'opencode.json'));
+    assert.ok((opencodeProject.mcp as Record<string, unknown>)['global-http']);
 
     await assert.rejects(
       providerMcpService.addMcpServerToAllProviders({

@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -12,80 +12,120 @@ import {
   readStringRecord,
 } from '@/shared/utils.js';
 
-/**
- * Strips `//` and `/* ... *​/` comments (string-aware: `https://` inside a
- * string literal is preserved) and trailing commas so JSONC parses as JSON.
- */
-export function stripJsoncComments(content: string): string {
-  let result = '';
-  let inString = false;
-  let inBlockComment = false;
-  let i = 0;
-  const n = content.length;
-  while (i < n) {
-    const ch = content[i];
-    const next = content[i + 1];
-    if (inBlockComment) {
-      if (ch === '*' && next === '/') {
-        inBlockComment = false;
-        i += 2;
-        continue;
-      }
-      i += 1;
-      continue;
-    }
-    if (inString) {
-      result += ch;
-      if (ch === '\\') {
-        if (next !== undefined) {
-          result += next;
-          i += 2;
-          continue;
-        }
-      } else if (ch === '"') {
-        inString = false;
-      }
-      i += 1;
-      continue;
-    }
-    if (ch === '"') {
-      inString = true;
-      result += ch;
-      i += 1;
-      continue;
-    }
-    if (ch === '/' && next === '/') {
-      while (i < n && content[i] !== '\n') {
-        i += 1;
-      }
-      continue;
-    }
-    if (ch === '/' && next === '*') {
-      inBlockComment = true;
-      i += 2;
-      continue;
-    }
-    result += ch;
-    i += 1;
-  }
-  return result.replace(/,\s*([}\]])/g, '$1');
-}
+type OpenCodeConfigPath = {
+  filePath: string;
+  exists: boolean;
+};
 
-const readJsoncConfig = async (filePath: string): Promise<Record<string, unknown>> => {
+const fileExists = async (filePath: string): Promise<boolean> => {
+  try {
+    await access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Removes JSONC comments without touching comment-like text inside strings.
+ */
+const stripJsonComments = (content: string): string => {
+  let output = '';
+  let inString = false;
+  let quote = '';
+  let escaped = false;
+
+  for (let index = 0; index < content.length; index += 1) {
+    const char = content[index];
+    const next = content[index + 1];
+
+    if (inString) {
+      output += char;
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === quote) {
+        inString = false;
+        quote = '';
+      }
+      continue;
+    }
+
+    if (char === '"' || char === '\'') {
+      inString = true;
+      quote = char;
+      output += char;
+      continue;
+    }
+
+    if (char === '/' && next === '/') {
+      while (index < content.length && content[index] !== '\n') {
+        index += 1;
+      }
+      output += '\n';
+      continue;
+    }
+
+    if (char === '/' && next === '*') {
+      index += 2;
+      while (index < content.length && !(content[index] === '*' && content[index + 1] === '/')) {
+        index += 1;
+      }
+      index += 1;
+      continue;
+    }
+
+    output += char;
+  }
+
+  return output;
+};
+
+const stripTrailingCommas = (content: string): string =>
+  content.replace(/,\s*([}\]])/g, '$1');
+
+const readOpenCodeConfig = async (filePath: string): Promise<Record<string, unknown>> => {
   try {
     const content = await readFile(filePath, 'utf8');
-    return readObjectRecord(JSON.parse(stripJsoncComments(content))) ?? {};
+    const parsed = JSON.parse(stripTrailingCommas(stripJsonComments(content))) as unknown;
+    return readObjectRecord(parsed) ?? {};
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') {
       return {};
     }
+
     throw error;
   }
 };
 
-const writeJsonConfig = async (filePath: string, data: Record<string, unknown>): Promise<void> => {
+const writeOpenCodeConfig = async (filePath: string, data: Record<string, unknown>): Promise<void> => {
   await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, JSON.stringify(data, null, 2), 'utf8');
+  await writeFile(filePath, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
+};
+
+/**
+ * Resolves the OpenCode config file for a scope. A `.jsonc` file takes
+ * precedence over `.json` when both exist; when neither exists the canonical
+ * `.json` path is the write target so new servers land in `opencode.json`.
+ */
+const resolveOpenCodeConfigPath = async (scope: McpScope, workspacePath: string): Promise<OpenCodeConfigPath> => {
+  const root = scope === 'user'
+    ? path.join(os.homedir(), '.config', 'opencode')
+    : workspacePath;
+  const jsoncPath = path.join(root, 'opencode.jsonc');
+  const jsonPath = path.join(root, 'opencode.json');
+
+  if (await fileExists(jsoncPath)) {
+    return { filePath: jsoncPath, exists: true };
+  }
+
+  if (await fileExists(jsonPath)) {
+    return { filePath: jsonPath, exists: true };
+  }
+
+  return { filePath: jsonPath, exists: false };
 };
 
 export class OpenCodeMcpProvider extends McpProvider {
@@ -93,14 +133,9 @@ export class OpenCodeMcpProvider extends McpProvider {
     super('opencode', ['user', 'project'], ['stdio', 'http']);
   }
 
-  private configPath(scope: McpScope, workspacePath: string): string {
-    return scope === 'user'
-      ? path.join(os.homedir(), '.config', 'opencode', 'opencode.jsonc')
-      : path.join(workspacePath, 'opencode.json');
-  }
-
   protected async readScopedServers(scope: McpScope, workspacePath: string): Promise<Record<string, unknown>> {
-    const config = await readJsoncConfig(this.configPath(scope, workspacePath));
+    const { filePath } = await resolveOpenCodeConfigPath(scope, workspacePath);
+    const config = await readOpenCodeConfig(filePath);
     return readObjectRecord(config.mcp) ?? {};
   }
 
@@ -109,9 +144,10 @@ export class OpenCodeMcpProvider extends McpProvider {
     workspacePath: string,
     servers: Record<string, unknown>,
   ): Promise<void> {
-    const config = await readJsoncConfig(this.configPath(scope, workspacePath));
+    const { filePath } = await resolveOpenCodeConfigPath(scope, workspacePath);
+    const config = await readOpenCodeConfig(filePath);
     config.mcp = servers;
-    await writeJsonConfig(this.configPath(scope, workspacePath), config);
+    await writeOpenCodeConfig(filePath, config);
   }
 
   protected buildServerConfig(input: UpsertProviderMcpServerInput): Record<string, unknown> {
@@ -122,21 +158,26 @@ export class OpenCodeMcpProvider extends McpProvider {
           statusCode: 400,
         });
       }
+
       return {
         type: 'local',
         command: [input.command, ...(input.args ?? [])],
+        enabled: true,
         environment: input.env ?? {},
       };
     }
+
     if (!input.url?.trim()) {
       throw new AppError('url is required for http MCP servers.', {
         code: 'MCP_URL_REQUIRED',
         statusCode: 400,
       });
     }
+
     return {
       type: 'remote',
       url: input.url,
+      enabled: true,
       headers: input.headers ?? {},
     };
   }
@@ -146,32 +187,47 @@ export class OpenCodeMcpProvider extends McpProvider {
     name: string,
     rawConfig: unknown,
   ): ProviderMcpServer | null {
-    if (!rawConfig || typeof rawConfig !== 'object') {
+    const config = readObjectRecord(rawConfig);
+    if (!config) {
       return null;
     }
-    const config = rawConfig as Record<string, unknown>;
-    if (config.type === 'local' || Array.isArray(config.command)) {
-      const commandArr = readStringArray(config.command) ?? [];
+
+    if (config.type === 'local' || config.command !== undefined) {
+      const commandParts = typeof config.command === 'string'
+        ? [config.command, ...(readStringArray(config.args) ?? [])]
+        : readStringArray(config.command);
+      const command = commandParts?.[0];
+      if (!command) {
+        return null;
+      }
+
       return {
         provider: 'opencode',
         name,
         scope,
         transport: 'stdio',
-        command: commandArr[0],
-        args: commandArr.slice(1),
-        env: readStringRecord(config.environment),
+        command,
+        args: commandParts.slice(1),
+        env: readStringRecord(config.environment) ?? readStringRecord(config.env),
       };
     }
+
     if (config.type === 'remote' || typeof config.url === 'string') {
+      const url = readOptionalString(config.url);
+      if (!url) {
+        return null;
+      }
+
       return {
         provider: 'opencode',
         name,
         scope,
         transport: 'http',
-        url: readOptionalString(config.url),
+        url,
         headers: readStringRecord(config.headers),
       };
     }
+
     return null;
   }
 }

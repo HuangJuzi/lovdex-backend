@@ -8,7 +8,17 @@ import {
   findTopmostGitRoot,
 } from '@/shared/utils.js';
 
-const COMPAT_DIRS = ['.opencode', '.claude', '.agents'];
+const OPENCODE_PROJECT_SKILL_DIRS = [
+  ['.opencode', 'skills'],
+  ['.claude', 'skills'],
+  ['.agents', 'skills'],
+];
+
+const OPENCODE_USER_SKILL_DIRS = [
+  ['.config', 'opencode', 'skills'],
+  ['.claude', 'skills'],
+  ['.agents', 'skills'],
+];
 
 export class OpenCodeSkillsProvider extends SkillsProvider {
   constructor() {
@@ -20,43 +30,50 @@ export class OpenCodeSkillsProvider extends SkillsProvider {
     const seenRootDirs = new Set<string>();
     const repoRoot = await findTopmostGitRoot(workspacePath);
 
-    // cwd-to-topmost-git-root `.opencode/.claude/.agents/skills` locations.
-    for (const compatDir of COMPAT_DIRS) {
-      addUniqueProviderSkillSource(sources, seenRootDirs, {
-        scope: 'project',
-        rootDir: path.join(workspacePath, compatDir, 'skills'),
-        commandPrefix: '/',
-      });
-    }
-
-    if (repoRoot) {
-      for (const compatDir of COMPAT_DIRS) {
+    for (const projectRoot of this.getProjectSearchRoots(workspacePath, repoRoot)) {
+      for (const skillDir of OPENCODE_PROJECT_SKILL_DIRS) {
+        // OpenCode intentionally reads Claude and Agents skill folders so users
+        // can reuse the same skill libraries across compatible coding agents.
         addUniqueProviderSkillSource(sources, seenRootDirs, {
           scope: 'project',
-          rootDir: path.join(path.dirname(workspacePath), compatDir, 'skills'),
-          commandPrefix: '/',
-        });
-        addUniqueProviderSkillSource(sources, seenRootDirs, {
-          scope: 'project',
-          rootDir: path.join(repoRoot, compatDir, 'skills'),
+          rootDir: path.join(projectRoot, ...skillDir),
           commandPrefix: '/',
         });
       }
     }
 
-    // Global OpenCode/Claude/Agents compatibility locations.
-    for (const compatDir of COMPAT_DIRS) {
-      const rootDir = compatDir === '.opencode'
-        ? path.join(os.homedir(), '.config', 'opencode', 'skills')
-        : path.join(os.homedir(), compatDir, 'skills');
+    for (const skillDir of OPENCODE_USER_SKILL_DIRS) {
       addUniqueProviderSkillSource(sources, seenRootDirs, {
         scope: 'user',
-        rootDir,
+        rootDir: path.join(os.homedir(), ...skillDir),
         commandPrefix: '/',
       });
     }
 
     return sources;
+  }
+
+  private getProjectSearchRoots(workspacePath: string, repoRoot: string | null): string[] {
+    const roots: string[] = [];
+    const normalizedWorkspacePath = path.resolve(workspacePath);
+    const normalizedRepoRoot = repoRoot ? path.resolve(repoRoot) : null;
+    let currentPath = normalizedWorkspacePath;
+
+    while (true) {
+      roots.push(currentPath);
+      if (!normalizedRepoRoot || currentPath === normalizedRepoRoot) {
+        break;
+      }
+
+      const parentPath = path.dirname(currentPath);
+      if (parentPath === currentPath) {
+        break;
+      }
+
+      currentPath = parentPath;
+    }
+
+    return roots;
   }
 
   protected async getGlobalSkillSource(): Promise<ProviderSkillSource> {

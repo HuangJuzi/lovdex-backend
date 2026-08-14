@@ -397,12 +397,12 @@ test('providerSkillsService lists codex repository, user, and system skills', { 
 });
 
 /**
- * This test covers Sophcode (opencode-family) skill lookup across
+ * This test covers OpenCode skill lookup across
  * cwd-to-git-root project folders plus the global OpenCode/Claude/Agents
  * compatibility locations.
  */
-test('providerSkillsService lists sophcode project and user compatibility skills', { concurrency: false }, async () => {
-  const tempRoot = await gitCleanFixtureRoot('llm-skills-sophcode-');
+test('providerSkillsService lists opencode project and user compatibility skills', { concurrency: false }, async () => {
+  const tempRoot = await gitCleanFixtureRoot('llm-skills-opencode-');
   const repoRoot = path.join(tempRoot, 'repo');
   const workspacePath = path.join(repoRoot, 'packages', 'app');
   await fs.mkdir(path.join(repoRoot, '.git'), { recursive: true });
@@ -447,7 +447,7 @@ test('providerSkillsService lists sophcode project and user compatibility skills
       'OpenCode Agents user skill',
     );
 
-    const skills = await providerSkillsService.listProviderSkills('sophcode', { workspacePath });
+    const skills = await providerSkillsService.listProviderSkills('opencode', { workspacePath });
     const byName = new Map(skills.map((skill) => [skill.name, skill]));
 
     assert.equal(byName.get('opencode-cwd')?.scope, 'project');
@@ -467,7 +467,7 @@ test('providerSkillsService lists sophcode project and user compatibility skills
  * This test covers managed global skill creation for providers that own a
  * writable user skill directory.
  */
-test('providerSkillsService adds global skills for claude, codex, and cursor', { concurrency: false }, async () => {
+test('providerSkillsService adds global skills for claude, codex, and opencode', { concurrency: false }, async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'llm-skills-create-'));
   const restoreHomeDir = patchHomeDir(tempRoot);
 
@@ -570,19 +570,19 @@ test('providerSkillsService adds global skills for claude, codex, and cursor', {
     );
     await assert.rejects(fs.stat(pendingBatchSkillPath), { code: 'ENOENT' });
 
-    const createdSophcodeSkills = await providerSkillsService.addProviderSkills('sophcode', {
+    const createdOpencodeSkills = await providerSkillsService.addProviderSkills('opencode', {
       entries: [
         {
-          directoryName: 'sophcode-global-dir',
-          content: '---\nname: sophcode-global\ndescription: Sophcode global skill\n---\n\nSophcode body.\n',
+          directoryName: 'opencode-global-dir',
+          content: '---\nname: opencode-global\ndescription: OpenCode global skill\n---\n\nOpenCode body.\n',
         },
       ],
     });
-    const createdSophcodeSkill = createdSophcodeSkills[0];
-    assert.ok(createdSophcodeSkill);
-    assert.equal(createdSophcodeSkill.command, '/sophcode-global');
+    const createdOpencodeSkill = createdOpencodeSkills[0];
+    assert.ok(createdOpencodeSkill);
+    assert.equal(createdOpencodeSkill.command, '/opencode-global');
     assert.equal(
-      createdSophcodeSkill.sourcePath.endsWith(path.join('.config', 'opencode', 'skills', 'sophcode-global-dir', 'SKILL.md')),
+      createdOpencodeSkill.sourcePath.endsWith(path.join('.config', 'opencode', 'skills', 'opencode-global-dir', 'SKILL.md')),
       true,
     );
 
@@ -592,8 +592,8 @@ test('providerSkillsService adds global skills for claude, codex, and cursor', {
     const listedCodexSkills = await providerSkillsService.listProviderSkills('codex');
     assert.equal(listedCodexSkills.some((skill) => skill.name === 'replacement'), true);
 
-    const listedSophcodeSkills = await providerSkillsService.listProviderSkills('sophcode');
-    assert.equal(listedSophcodeSkills.some((skill) => skill.name === 'sophcode-global'), true);
+    const listedOpencodeSkills = await providerSkillsService.listProviderSkills('opencode');
+    assert.equal(listedOpencodeSkills.some((skill) => skill.name === 'opencode-global'), true);
 
     const removedCodexSkill = await providerSkillsService.removeProviderSkill('codex', {
       directoryName: 'uploaded-codex-folder',
@@ -632,31 +632,31 @@ test('providerSkillsService adds global skills for claude, codex, and cursor', {
 });
 
 /**
- * Sophcode owns a writable user skill folder (`~/.config/opencode/skills`),
+ * OpenCode owns a writable user skill folder (`~/.config/opencode/skills`),
  * so direct writes through the managed provider endpoint are accepted.
  */
-test('providerSkillsService writes and removes sophcode global skills', { concurrency: false }, async () => {
-  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'llm-skills-sophcode-'));
+test('providerSkillsService writes and removes opencode global skills', { concurrency: false }, async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'llm-skills-opencode-'));
   const restoreHomeDir = patchHomeDir(tempRoot);
   try {
-    const created = await providerSkillsService.addProviderSkills('sophcode', {
+    const created = await providerSkillsService.addProviderSkills('opencode', {
       entries: [
         {
-          directoryName: 'sophcode-managed-dir',
-          content: '---\nname: sophcode-managed\ndescription: Managed skill\n---\n\nManaged body.\n',
+          directoryName: 'opencode-managed-dir',
+          content: '---\nname: opencode-managed\ndescription: Managed skill\n---\n\nManaged body.\n',
         },
       ],
     });
     const skill = created[0];
     assert.ok(skill);
-    assert.equal(skill.command, '/sophcode-managed');
+    assert.equal(skill.command, '/opencode-managed');
     assert.match(await fs.readFile(skill.sourcePath, 'utf8'), /Managed body\./);
 
-    const removed = await providerSkillsService.removeProviderSkill('sophcode', {
-      directoryName: 'sophcode-managed-dir',
+    const removed = await providerSkillsService.removeProviderSkill('opencode', {
+      directoryName: 'opencode-managed-dir',
     });
     assert.equal(removed.removed, true);
-    assert.equal(removed.provider, 'sophcode');
+    assert.equal(removed.provider, 'opencode');
     await assert.rejects(fs.stat(path.dirname(skill.sourcePath)), { code: 'ENOENT' });
   } finally {
     restoreHomeDir();
