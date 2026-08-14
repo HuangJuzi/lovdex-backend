@@ -341,7 +341,7 @@ test('migrateTasksTable rebuilds label CHECK to include reminder and adds source
     assert.equal(row.title, 'scheduled notice');
     assert.equal(row.description, 'a description');
     assert.equal(row.status, 'done');
-    assert.equal(row.executor_provider, 'sophcode');
+    assert.equal(row.executor_provider, 'opencode'); // sophcode renamed by the opencode provider migration
     assert.equal(row.executor_model, 'soph-2');
     assert.equal(row.position, 3);
     assert.equal(row.session_id, 'sess-rem');

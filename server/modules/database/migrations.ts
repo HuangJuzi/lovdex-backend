@@ -483,9 +483,12 @@ const migrateTasksTable = (db: Database): void => {
   // CHECK, so rename → recreate from the current schema → copy every column →
   // drop legacy. Re-fetch the table SQL fresh (the sub_status rebuild above may
   // have just changed it) and gate on the new engine name so it's idempotent.
+  // The gate also requires that no newer engine list ('opencode') is already in
+  // place: TASKS_TABLE_SCHEMA_SQL no longer carries 'sophcode', so on fresh
+  // installs / already-upgraded DBs this must stay a no-op.
   const tasksSqlForEngine =
     (db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'").get() as { sql?: string } | undefined)?.sql ?? '';
-  if (!tasksSqlForEngine.includes("'sophcode'")) {
+  if (!tasksSqlForEngine.includes("'sophcode'") && !tasksSqlForEngine.includes("'opencode'")) {
     console.log('Running migration: rebuild tasks table to accept sophcode executor');
     try {
       db.exec('BEGIN');
@@ -505,6 +508,42 @@ const migrateTasksTable = (db: Database): void => {
       throw err;
     }
   }
+
+  // Rename provider id 'sophcode' -> 'opencode' across sessions and tasks, and
+  // rebuild the tasks CHECK to accept opencode + qoder executors. sessions has
+  // no CHECK on provider, so the rename there is unconditional. The tasks rename
+  // can only happen through the rebuild: the legacy CHECK rejects 'opencode', so
+  // the rebuild maps sophcode -> opencode inside its INSERT...SELECT instead of
+  // pre-renaming rows.
+  db.prepare(`UPDATE sessions SET provider='opencode' WHERE provider='sophcode'`).run();
+  const tasksSqlForOpenCode =
+    (db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'").get() as { sql?: string } | undefined)?.sql ?? '';
+  if (!tasksSqlForOpenCode.includes("'opencode'")) {
+    console.log('Running migration: rebuild tasks table to accept opencode + qoder executors');
+    try {
+      db.exec('BEGIN');
+      db.exec('ALTER TABLE tasks RENAME TO tasks_legacy_engine;');
+      db.exec(TASKS_TABLE_SCHEMA_SQL);
+      db.exec(`
+        INSERT INTO tasks (task_id, project_path, title, description, status, executor_provider, executor_model, position, session_id, started_at, completed_at, created_at, updated_at, ai_summary, sub_status, verdict_reason, verdict_at, priority, deadline, is_operator, label, remark)
+        SELECT task_id, project_path, title, description, status,
+               CASE WHEN executor_provider = 'sophcode' THEN 'opencode' ELSE executor_provider END,
+               executor_model, position, session_id, started_at, completed_at, created_at, updated_at, ai_summary, sub_status, verdict_reason, verdict_at, priority, deadline, is_operator, label, remark
+        FROM tasks_legacy_engine
+      `);
+      db.exec('DROP TABLE tasks_legacy_engine;');
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_project_status ON tasks(project_path, status);`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_id);`);
+      db.exec('COMMIT');
+    } catch (rebuildError) {
+      db.exec('ROLLBACK');
+      throw rebuildError;
+    }
+  }
+  // Re-run AFTER rebuild for the unlikely case CREATE TABLE already produced
+  // 'opencode' data (idempotent); safe because the tasks CHECK accepts
+  // 'opencode' whenever this statement runs.
+  db.prepare(`UPDATE tasks SET executor_provider='opencode' WHERE executor_provider='sophcode'`).run();
 
   // Rebuild tasks table so the sub_status CHECK accepts the persisted
   // waiting_answer / waiting_plan values (a run that ended at an

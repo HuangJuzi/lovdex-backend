@@ -74,7 +74,7 @@ export type AuthenticatedWebSocketRequest = IncomingMessage & {
  * Use this as the source of truth whenever a function or payload needs to identify
  * a specific LLM integration.
  */
-export type LLMProvider = 'claude' | 'codex' | 'sophcode';
+export type LLMProvider = 'claude' | 'codex' | 'opencode' | 'qoder';
 
 /**
  * One selectable model row in a provider model catalog.
@@ -901,7 +901,7 @@ export type { TaskStatus } from '@/shared/task-status.js';
 /**
  * Executor engines supported by task execution.
  */
-export type TaskEngine = 'claude' | 'codex' | 'sophcode';
+export type TaskEngine = 'claude' | 'codex' | 'opencode' | 'qoder';
 
 /**
  * Canonical task row shape returned by the tasks repository.
