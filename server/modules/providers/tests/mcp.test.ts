@@ -276,7 +276,7 @@ test('providerMcpService global adder writes to all providers and rejects unsupp
       workspacePath,
     });
 
-    assert.equal(globalResult.length, 3);
+    assert.equal(globalResult.length, 4);
     assert.ok(globalResult.every((entry) => entry.created === true));
 
     const claudeProject = await readJson(path.join(workspacePath, '.mcp.json'));
@@ -287,6 +287,12 @@ test('providerMcpService global adder writes to all providers and rejects unsupp
 
     const opencodeProject = await readJson(path.join(workspacePath, 'opencode.json'));
     assert.ok((opencodeProject.mcp as Record<string, unknown>)['global-http']);
+
+    // qoder prefers <workspace>/.qoder/settings.json, but falls back to the
+    // MCP-standard <workspace>/.mcp.json (already created by claude above), so
+    // the global server lands in the shared project file for qoder too.
+    const qoderProject = await readJson(path.join(workspacePath, '.qoder', 'settings.json')).catch(() => readJson(path.join(workspacePath, '.mcp.json')));
+    assert.ok((qoderProject.mcpServers as Record<string, unknown>)['global-http']);
 
     await assert.rejects(
       providerMcpService.addMcpServerToAllProviders({

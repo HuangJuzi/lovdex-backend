@@ -253,6 +253,42 @@ export function parseImagesInputTag(text: string): ParsedImagesInput {
   };
 }
 
+const FILES_INPUT_TAG_PATTERN = /\s*<files_input>([\s\S]*?)<\/files_input>\s*/g;
+
+/**
+ * Strips the last provider-neutral file reference block from persisted prompt
+ * text and restores its attachment descriptors for chat history.
+ */
+export function parseFilesInputTag(text: string): {
+  text: string;
+  filePaths: string[];
+  attachments: ParsedImageAttachment[];
+} {
+  if (typeof text !== 'string' || !text.includes('<files_input>')) {
+    return { text, filePaths: [], attachments: [] };
+  }
+
+  let lastMatch: RegExpExecArray | null = null;
+  FILES_INPUT_TAG_PATTERN.lastIndex = 0;
+  for (let match = FILES_INPUT_TAG_PATTERN.exec(text); match; match = FILES_INPUT_TAG_PATTERN.exec(text)) {
+    lastMatch = match;
+  }
+  if (!lastMatch) {
+    return { text, filePaths: [], attachments: [] };
+  }
+
+  const attachments = parseNumberedImageEntries(lastMatch[1]);
+  const stripped = (
+    text.slice(0, lastMatch.index) + '\n' + text.slice(lastMatch.index + lastMatch[0].length)
+  ).trim();
+
+  return {
+    text: stripped,
+    filePaths: attachments.map((attachment) => attachment.path),
+    attachments,
+  };
+}
+
 /** Maps raw image paths to the attachment shape carried by NormalizedMessage.images. */
 export function toImageAttachments(imagePaths: string[]): Array<{ path: string }> {
   return imagePaths.map((imagePath) => ({ path: toPosixPath(imagePath) }));
