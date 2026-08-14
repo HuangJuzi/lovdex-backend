@@ -66,6 +66,7 @@ type CreateTaskInput = {
   isOperator?: boolean;
   label?: TaskLabel;
   remark?: string | null;
+  sourceScheduleId?: string | null;
 };
 
 /**
@@ -260,6 +261,7 @@ export function createTasksService(
         isOperator,
         label: input.label ?? 'other',
         remark: input.remark ?? null,
+        sourceScheduleId: input.sourceScheduleId ?? null,
       });
       emit({ kind: 'task_upserted', task: row, actor: 'user' });
       return decorate(row);

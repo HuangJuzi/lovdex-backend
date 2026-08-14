@@ -46,6 +46,7 @@ export function buildTasksRouter(tasksService: TasksService, deps: { createSessi
         isOperator: body.isOperator === true,
         label: body.label as TaskLabel | undefined,
         remark: typeof body.remark === 'string' ? body.remark : null,
+        sourceScheduleId: typeof body.sourceScheduleId === 'string' ? body.sourceScheduleId : null,
       });
       res.status(201).json(task);
     }),
