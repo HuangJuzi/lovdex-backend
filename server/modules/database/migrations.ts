@@ -446,13 +446,18 @@ const migrateTasksTable = (db: Database): void => {
   const tasksTableSql = (db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'").get() as { sql?: string } | undefined)?.sql ?? '';
   if (!tasksTableSql.includes('sub_status')) {
     console.log('Running migration: rebuild tasks table for two-layer status');
+    db.exec('PRAGMA foreign_keys = OFF');
     try {
       db.exec('BEGIN');
       // Only needed on pre-verdict legacy tables so the INSERT...SELECT below
       // can read `verdict`; on fresh installs the schema already has sub_status
       // (no verdict) and this rebuild is skipped entirely.
       addColumnToTableIfNotExists(db, 'tasks', taskColumnNames, 'verdict', "TEXT CHECK (verdict IS NULL OR verdict IN ('done','only_plan','needs_review','blocked'))");
-      // tasks 是叶子表（无表 REFERENCES tasks），无需 PRAGMA foreign_keys 开关。
+      // FK enforcement stays OFF through the rebuild: legacy tasks rows can hold
+      // project_path values orphaned from a past projects rebuild (run with FK
+      // off, no cascade), so re-validating the INSERT...SELECT against projects
+      // would throw SQLITE_CONSTRAINT_FOREIGNKEY and block boot. Rows are copied
+      // verbatim, so disabling yields the same data with FK re-enabled after.
       db.exec('ALTER TABLE tasks RENAME TO tasks_legacy;');
       db.exec(TASKS_TABLE_SCHEMA_SQL);
       db.exec(`
@@ -475,6 +480,8 @@ const migrateTasksTable = (db: Database): void => {
     } catch (err) {
       db.exec('ROLLBACK');
       throw err;
+    } finally {
+      db.exec('PRAGMA foreign_keys = ON');
     }
   }
 
@@ -490,6 +497,7 @@ const migrateTasksTable = (db: Database): void => {
     (db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'").get() as { sql?: string } | undefined)?.sql ?? '';
   if (!tasksSqlForEngine.includes("'sophcode'") && !tasksSqlForEngine.includes("'opencode'")) {
     console.log('Running migration: rebuild tasks table for executor engines (opencode + qoder)');
+    db.exec('PRAGMA foreign_keys = OFF');
     try {
       db.exec('BEGIN');
       db.exec('ALTER TABLE tasks RENAME TO tasks_legacy_engine;');
@@ -506,6 +514,8 @@ const migrateTasksTable = (db: Database): void => {
     } catch (err) {
       db.exec('ROLLBACK');
       throw err;
+    } finally {
+      db.exec('PRAGMA foreign_keys = ON');
     }
   }
 
@@ -532,6 +542,7 @@ const migrateTasksTable = (db: Database): void => {
     (db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'").get() as { sql?: string } | undefined)?.sql ?? '';
   if (!tasksSqlForOpenCode.includes("'opencode'")) {
     console.log('Running migration: rebuild tasks table to accept opencode + qoder executors');
+    db.exec('PRAGMA foreign_keys = OFF');
     try {
       db.exec('BEGIN');
       db.exec('ALTER TABLE tasks RENAME TO tasks_legacy_engine;');
@@ -551,6 +562,8 @@ const migrateTasksTable = (db: Database): void => {
     } catch (rebuildError) {
       db.exec('ROLLBACK');
       throw rebuildError;
+    } finally {
+      db.exec('PRAGMA foreign_keys = ON');
     }
   }
   // Re-run AFTER rebuild for the unlikely case CREATE TABLE already produced
@@ -571,6 +584,7 @@ const migrateTasksTable = (db: Database): void => {
     (db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'").get() as { sql?: string } | undefined)?.sql ?? '';
   if (!tasksSqlForWaiting.includes("'waiting_answer'")) {
     console.log('Running migration: rebuild tasks table to accept persisted waiting_* sub_status');
+    db.exec('PRAGMA foreign_keys = OFF');
     try {
       db.exec('BEGIN');
       db.exec('ALTER TABLE tasks RENAME TO tasks_legacy_waiting;');
@@ -588,6 +602,8 @@ const migrateTasksTable = (db: Database): void => {
     } catch (err) {
       db.exec('ROLLBACK');
       throw err;
+    } finally {
+      db.exec('PRAGMA foreign_keys = ON');
     }
   }
 
@@ -601,6 +617,7 @@ const migrateTasksTable = (db: Database): void => {
   const tasksDdl = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'").get() as { sql: string } | undefined;
   if (tasksDdl && !tasksDdl.sql.includes("'reminder'")) {
     console.log('Running migration: rebuilding tasks table for label CHECK (reminder)');
+    db.exec('PRAGMA foreign_keys = OFF');
     try {
       db.exec('BEGIN');
       db.exec('ALTER TABLE tasks RENAME TO tasks_legacy_label;');
@@ -618,6 +635,8 @@ const migrateTasksTable = (db: Database): void => {
     } catch (err) {
       db.exec('ROLLBACK');
       throw err;
+    } finally {
+      db.exec('PRAGMA foreign_keys = ON');
     }
   }
 };

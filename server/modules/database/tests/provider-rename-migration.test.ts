@@ -25,6 +25,10 @@ const createUsersBase = (db: Database.Database): void => {
 
 const seedLegacyDb = (): Database.Database => {
   const db = new Database(':memory:');
+  // Mirror production: better-sqlite3 compiles SQLite with FK enforcement ON and
+  // the real tasks table carries orphan project_path rows (no matching projects
+  // row), so the rebuild gates must not re-validate the copy into a boot-block.
+  db.exec('PRAGMA foreign_keys = ON');
   createUsersBase(db);
   // better-sqlite3 compiles SQLite with foreign keys ON, and the rebuilt tasks
   // table references projects(project_path), so the legacy path must exist.
@@ -50,6 +54,9 @@ const seedLegacyDb = (): Database.Database => {
     label TEXT, remark TEXT, source_schedule_id TEXT
   )`);
   db.prepare(`INSERT INTO tasks (task_id, project_path, title, label, priority, executor_provider, source_schedule_id) VALUES ('t1','/tmp/legacy-repo','legacy task','other','P2','sophcode','sch-1')`).run();
+  // Orphan FK row: project_path '/tmp/orphan-missing' has no row in projects;
+  // must survive the rebuilds instead of tripping SQLITE_CONSTRAINT_FOREIGNKEY.
+  db.prepare(`INSERT INTO tasks (task_id, project_path, title, label, priority, executor_provider) VALUES ('t-orphan','/tmp/orphan-missing','orphan task','other','P2','sophcode')`).run();
   db.exec(`CREATE TABLE sessions (
     session_id TEXT PRIMARY KEY, provider TEXT NOT NULL DEFAULT 'claude',
     provider_session_id TEXT, project_path TEXT NOT NULL DEFAULT '',
@@ -61,6 +68,9 @@ const seedLegacyDb = (): Database.Database => {
 
 test('migration renames sophcode rows and accepts opencode/qoder executor engines', () => {
   const db = seedLegacyDb();
+  // FK enforcement ON before the migration (mirrors prod); the orphan row below
+  // genuinely reproduces the failure the rebuild gates' FK toggling must avoid.
+  assert.equal(db.pragma('foreign_keys', { simple: true }), 1);
   runMigrations(db);
 
   const session = db.prepare(`SELECT provider FROM sessions WHERE session_id='s1'`).get() as { provider: string };
@@ -71,6 +81,14 @@ test('migration renames sophcode rows and accepts opencode/qoder executor engine
   // source_schedule_id (a column the legacy table already had) must survive the
   // rename→recreate→copy rebuilds unchanged, not be silently NULLed.
   assert.equal(task.source_schedule_id, 'sch-1');
+
+  // The orphan FK row survives every rebuild with its project_path intact.
+  const orphan = db.prepare(`SELECT executor_provider, project_path FROM tasks WHERE task_id='t-orphan'`).get() as { executor_provider: string; project_path: string };
+  assert.equal(orphan.executor_provider, 'opencode');
+  assert.equal(orphan.project_path, '/tmp/orphan-missing');
+
+  // FK enforcement restored after the migration completes.
+  assert.equal(db.pragma('foreign_keys', { simple: true }), 1);
 
   // CHECK now accepts opencode and qoder; rejects nothing it used to reject
   db.prepare(`INSERT INTO tasks (task_id, project_path, title, executor_provider) VALUES ('t2','/tmp/legacy-repo','t2','qoder')`).run();
