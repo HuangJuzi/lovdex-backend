@@ -161,6 +161,9 @@ export async function queryQoder(command, options = {}, ws) {
     // Unified lifecycle contract: exactly one terminal `complete` per run
     // (close and error handlers can both fire for spawn failures).
     let completeSent = false;
+    // A spawn failure fires BOTH the 'error' and 'close' handlers; this flag
+    // dedupes the "Qoder CLI is not installed" hint so the user sees it once.
+    let notInstalledSent = false;
 
     const notifyTerminalState = ({ code = null, error = null } = {}) => {
       if (terminalNotificationSent) {
@@ -377,7 +380,8 @@ export async function queryQoder(command, options = {}, ws) {
 
       if (code === 127 || code === null) {
         const installed = await providerAuthService.isProviderInstalled('qoder');
-        if (!installed) {
+        if (!installed && !notInstalledSent) {
+          notInstalledSent = true;
           sendMessage(ws, createNormalizedMessage({
             kind: 'error',
             content: 'Qoder CLI is not installed. Install it with: npm i -g @qoder-ai/qodercli',
@@ -400,6 +404,9 @@ export async function queryQoder(command, options = {}, ws) {
       const errorContent = !installed
         ? 'Qoder CLI is not installed. Install it with: npm i -g @qoder-ai/qodercli'
         : error.message;
+      if (!installed) {
+        notInstalledSent = true;
+      }
 
       sendMessage(ws, createNormalizedMessage({
         kind: 'error',

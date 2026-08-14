@@ -564,6 +564,9 @@ const migrateTasksTable = (db: Database): void => {
   // of falling back to the "进行中" running badge). Same rename→recreate→copy→
   // drop pattern as the executor rebuild above; gated on 'waiting_answer' so it
   // is idempotent and skipped on fresh installs whose schema already has it.
+  // This is legacy-conservative: only DDL from the opencode era that predates
+  // the waiting_* sub_statuses triggers it — every newer schema already carries
+  // 'waiting_answer', so it stays a no-op there.
   const tasksSqlForWaiting =
     (db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'").get() as { sql?: string } | undefined)?.sql ?? '';
   if (!tasksSqlForWaiting.includes("'waiting_answer'")) {
@@ -593,6 +596,8 @@ const migrateTasksTable = (db: Database): void => {
   // current schema → copy every column → drop legacy). Gated on the current
   // DDL lacking 'reminder' so it's idempotent. The index name conflict is
   // why DROP TABLE tasks_legacy_label runs BEFORE the indexes are recreated.
+  // Like the waiting_* gate above, this is legacy-conservative: only DDL from
+  // the opencode era that predates the 'reminder' label value triggers it.
   const tasksDdl = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'").get() as { sql: string } | undefined;
   if (tasksDdl && !tasksDdl.sql.includes("'reminder'")) {
     console.log('Running migration: rebuilding tasks table for label CHECK (reminder)');
@@ -657,6 +662,18 @@ export const runMigrations = (db: Database) => {
     ensureProjectsForSessionPaths(db);
 
     migrateTasksTable(db);
+
+    // Scheduled-tasks row rename for the sophcode → opencode provider id.
+    // The scheduler dispatches a due row by passing executor_provider straight
+    // to createTask, and the tasks CHECK now only accepts opencode/qoder — a
+    // legacy 'sophcode' value would hard-fail that insert. No CHECK exists on
+    // scheduled_tasks.executor_provider, so the rows are renamed in place.
+    // Guarded on table existence because runMigrations itself never creates the
+    // table (it lives in the combined schema only); fresh DBs start clean.
+    const scheduledTasksExists = tableExists(db, 'scheduled_tasks');
+    if (scheduledTasksExists) {
+      db.prepare(`UPDATE scheduled_tasks SET executor_provider='opencode' WHERE executor_provider='sophcode'`).run();
+    }
 
     db.exec('CREATE INDEX IF NOT EXISTS idx_session_ids_lookup ON sessions(session_id)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_sessions_provider_session_id ON sessions(provider_session_id)');

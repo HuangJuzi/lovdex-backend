@@ -2,9 +2,10 @@
  * OpenCode CLI Integration
  * =========================
  *
- * Drives the `opencode` binary (an opencode fork) in non-interactive
- * `run --format json` mode. This is the first CLI-based provider runtime in
- * lovdex — claude/codex use official SDKs, but opencode has no SDK, so the
+ * Drives the real `opencode` CLI in non-interactive `run --format json` mode,
+ * falling back to the local `sophcode` binary (an opencode fork) when no
+ * `opencode` binary is on PATH. This is the first CLI-based provider runtime
+ * in lovdex — claude/codex use official SDKs, but opencode has no SDK, so the
  * runner spawns the CLI and parses its NDJSON event stream
  * (`step_start` / `text` / `step_finish`).
  *
@@ -32,7 +33,7 @@ const activeOpenCodeProcesses = new Map();
 /**
  * Maps the UI permission mode onto opencode's non-interactive controls.
  *
- * opencode (opencode fork) has no single "permission mode" flag; each mode
+ * opencode has no single "permission mode" flag; each mode
  * uses a different lever of the `opencode run` CLI:
  * - plan              → the built-in read-only `plan` agent (`--agent plan`).
  * - bypassPermissions → `--auto`, which auto-approves every permission that
