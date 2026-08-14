@@ -47,9 +47,9 @@ const seedLegacyDb = (): Database.Database => {
     session_id TEXT, started_at TEXT, completed_at TEXT, created_at TEXT, updated_at TEXT,
     ai_summary TEXT, sub_status TEXT, verdict_reason TEXT, verdict_at TEXT,
     priority TEXT, deadline TEXT, is_operator INTEGER NOT NULL DEFAULT 0,
-    label TEXT, remark TEXT
+    label TEXT, remark TEXT, source_schedule_id TEXT
   )`);
-  db.prepare(`INSERT INTO tasks (task_id, project_path, title, label, priority, executor_provider) VALUES ('t1','/tmp/legacy-repo','legacy task','other','P2','sophcode')`).run();
+  db.prepare(`INSERT INTO tasks (task_id, project_path, title, label, priority, executor_provider, source_schedule_id) VALUES ('t1','/tmp/legacy-repo','legacy task','other','P2','sophcode','sch-1')`).run();
   db.exec(`CREATE TABLE sessions (
     session_id TEXT PRIMARY KEY, provider TEXT NOT NULL DEFAULT 'claude',
     provider_session_id TEXT, project_path TEXT NOT NULL DEFAULT '',
@@ -66,8 +66,11 @@ test('migration renames sophcode rows and accepts opencode/qoder executor engine
   const session = db.prepare(`SELECT provider FROM sessions WHERE session_id='s1'`).get() as { provider: string };
   assert.equal(session.provider, 'opencode');
 
-  const task = db.prepare(`SELECT executor_provider FROM tasks WHERE task_id='t1'`).get() as { executor_provider: string };
+  const task = db.prepare(`SELECT executor_provider, source_schedule_id FROM tasks WHERE task_id='t1'`).get() as { executor_provider: string; source_schedule_id: string | null };
   assert.equal(task.executor_provider, 'opencode');
+  // source_schedule_id (a column the legacy table already had) must survive the
+  // rename→recreate→copy rebuilds unchanged, not be silently NULLed.
+  assert.equal(task.source_schedule_id, 'sch-1');
 
   // CHECK now accepts opencode and qoder; rejects nothing it used to reject
   db.prepare(`INSERT INTO tasks (task_id, project_path, title, executor_provider) VALUES ('t2','/tmp/legacy-repo','t2','qoder')`).run();

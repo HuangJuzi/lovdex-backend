@@ -489,7 +489,7 @@ const migrateTasksTable = (db: Database): void => {
   const tasksSqlForEngine =
     (db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'").get() as { sql?: string } | undefined)?.sql ?? '';
   if (!tasksSqlForEngine.includes("'sophcode'") && !tasksSqlForEngine.includes("'opencode'")) {
-    console.log('Running migration: rebuild tasks table to accept sophcode executor');
+    console.log('Running migration: rebuild tasks table for executor engines (opencode + qoder)');
     try {
       db.exec('BEGIN');
       db.exec('ALTER TABLE tasks RENAME TO tasks_legacy_engine;');
@@ -509,6 +509,18 @@ const migrateTasksTable = (db: Database): void => {
     }
   }
 
+  // Scheduled-tasks: link created tasks back to their schedule template.
+  // Adds the column unconditionally (fresh DBs already have it via
+  // TASKS_TABLE_SCHEMA_SQL; upgraded DBs get it here). Re-fetch column names:
+  // a rebuild above may have just recreated `tasks` from TASKS_TABLE_SCHEMA_SQL
+  // (which already carries source_schedule_id), so the earlier snapshot would
+  // be stale and falsely trigger ALTER TABLE ADD COLUMN. This must run before
+  // the opencode rebuild below so every rename→recreate→copy gate down-chain has
+  // source_schedule_id available to preserve (the label gate already expects it).
+  const currentTaskColumnNames = (db.prepare('PRAGMA table_info(tasks)').all() as { name: string }[]).map((column) => column.name);
+  addColumnToTableIfNotExists(db, 'tasks', currentTaskColumnNames, 'source_schedule_id', 'TEXT');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_source_schedule ON tasks(source_schedule_id)');
+
   // Rename provider id 'sophcode' -> 'opencode' across sessions and tasks, and
   // rebuild the tasks CHECK to accept opencode + qoder executors. sessions has
   // no CHECK on provider, so the rename there is unconditional. The tasks rename
@@ -525,15 +537,16 @@ const migrateTasksTable = (db: Database): void => {
       db.exec('ALTER TABLE tasks RENAME TO tasks_legacy_engine;');
       db.exec(TASKS_TABLE_SCHEMA_SQL);
       db.exec(`
-        INSERT INTO tasks (task_id, project_path, title, description, status, executor_provider, executor_model, position, session_id, started_at, completed_at, created_at, updated_at, ai_summary, sub_status, verdict_reason, verdict_at, priority, deadline, is_operator, label, remark)
+        INSERT INTO tasks (task_id, project_path, title, description, status, executor_provider, executor_model, position, session_id, started_at, completed_at, created_at, updated_at, ai_summary, sub_status, verdict_reason, verdict_at, priority, deadline, is_operator, label, remark, source_schedule_id)
         SELECT task_id, project_path, title, description, status,
                CASE WHEN executor_provider = 'sophcode' THEN 'opencode' ELSE executor_provider END,
-               executor_model, position, session_id, started_at, completed_at, created_at, updated_at, ai_summary, sub_status, verdict_reason, verdict_at, priority, deadline, is_operator, label, remark
+               executor_model, position, session_id, started_at, completed_at, created_at, updated_at, ai_summary, sub_status, verdict_reason, verdict_at, priority, deadline, is_operator, label, remark, source_schedule_id
         FROM tasks_legacy_engine
       `);
       db.exec('DROP TABLE tasks_legacy_engine;');
       db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_project_status ON tasks(project_path, status);`);
       db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_id);`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_source_schedule ON tasks(source_schedule_id);`);
       db.exec('COMMIT');
     } catch (rebuildError) {
       db.exec('ROLLBACK');
@@ -560,29 +573,20 @@ const migrateTasksTable = (db: Database): void => {
       db.exec('ALTER TABLE tasks RENAME TO tasks_legacy_waiting;');
       db.exec(TASKS_TABLE_SCHEMA_SQL);
       db.exec(`
-        INSERT INTO tasks (task_id, project_path, title, description, status, executor_provider, executor_model, position, session_id, started_at, completed_at, created_at, updated_at, ai_summary, sub_status, verdict_reason, verdict_at, priority, deadline, is_operator, label, remark)
-        SELECT task_id, project_path, title, description, status, executor_provider, executor_model, position, session_id, started_at, completed_at, created_at, updated_at, ai_summary, sub_status, verdict_reason, verdict_at, priority, deadline, is_operator, label, remark
+        INSERT INTO tasks (task_id, project_path, title, description, status, executor_provider, executor_model, position, session_id, started_at, completed_at, created_at, updated_at, ai_summary, sub_status, verdict_reason, verdict_at, priority, deadline, is_operator, label, remark, source_schedule_id)
+        SELECT task_id, project_path, title, description, status, executor_provider, executor_model, position, session_id, started_at, completed_at, created_at, updated_at, ai_summary, sub_status, verdict_reason, verdict_at, priority, deadline, is_operator, label, remark, source_schedule_id
         FROM tasks_legacy_waiting;
       `);
       db.exec('DROP TABLE tasks_legacy_waiting;');
       db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_project_status ON tasks(project_path, status);`);
       db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_id);`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_source_schedule ON tasks(source_schedule_id);`);
       db.exec('COMMIT');
     } catch (err) {
       db.exec('ROLLBACK');
       throw err;
     }
   }
-
-  // Scheduled-tasks: link created tasks back to their schedule template.
-  // Adds the column unconditionally (fresh DBs already have it via
-  // TASKS_TABLE_SCHEMA_SQL; upgraded DBs get it here). Re-fetch column names:
-  // a rebuild above may have just recreated `tasks` from TASKS_TABLE_SCHEMA_SQL
-  // (which already carries source_schedule_id), so the earlier snapshot would
-  // be stale and falsely trigger ALTER TABLE ADD COLUMN.
-  const currentTaskColumnNames = (db.prepare('PRAGMA table_info(tasks)').all() as { name: string }[]).map((column) => column.name);
-  addColumnToTableIfNotExists(db, 'tasks', currentTaskColumnNames, 'source_schedule_id', 'TEXT');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_source_schedule ON tasks(source_schedule_id)');
 
   // Rebuild the tasks table to extend the label CHECK constraint with
   // 'reminder' (SQLite can't ALTER a CHECK, so rename → recreate from the
