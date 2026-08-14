@@ -35,9 +35,9 @@ import {
     abortCodexSession,
 } from './openai-codex.js';
 import {
-    abortSophcodeSession,
-    querySophcode,
-} from './sophcode-runner.js';
+    abortOpenCodeSession,
+    queryOpenCode,
+} from './opencode-runner.js';
 import commandsRoutes from './routes/commands.js';
 import sessionsRoutes from './routes/sessions.js';
 import projectModuleRoutes from './modules/projects/projects.routes.js';
@@ -95,7 +95,8 @@ const server = http.createServer(app);
 const spawnFns = {
     claude: queryClaudeSDK,
     codex: queryCodex,
-    sophcode: querySophcode,
+    opencode: queryOpenCode,
+    // qoder（T7）: qoder-spawn added with the qoder runner
 };
 
 // Single WebSocket server that handles chat.
@@ -109,7 +110,8 @@ const wss = createWebSocketServer(server, {
         abortFns: {
             claude: abortClaudeSDKSession,
             codex: abortCodexSession,
-            sophcode: abortSophcodeSession,
+            opencode: abortOpenCodeSession,
+            // qoder（T7）
         },
         resolveToolApproval,
         getPendingApprovalsForSession,
@@ -1153,19 +1155,19 @@ app.get('/api/projects/:projectId/sessions/:sessionId/token-usage', authenticate
             });
         }
 
-        // Handle Sophcode sessions (opencode-family CLI; token usage lives in
+        // Handle OpenCode sessions (opencode-family CLI; token usage lives in
         // the shared opencode SQLite database).
-        if (provider === 'sophcode') {
+        if (provider === 'opencode') {
             const dbPath = path.join(homeDir, '.local', 'share', 'opencode', 'opencode.db');
             if (!fs.existsSync(dbPath)) {
-                return res.status(404).json({ error: 'Sophcode db not found' });
+                return res.status(404).json({ error: 'OpenCode db not found' });
             }
 
             let db;
             try {
                 db = new Database(dbPath, { readonly: true, fileMustExist: true });
             } catch {
-                return res.status(404).json({ error: 'Sophcode db not found' });
+                return res.status(404).json({ error: 'OpenCode db not found' });
             }
             try {
                 const row = db.prepare(
@@ -1173,7 +1175,7 @@ app.get('/api/projects/:projectId/sessions/:sessionId/token-usage', authenticate
                      FROM session WHERE id = ?`
                 ).get(providerNativeSessionId);
                 if (!row) {
-                    return res.status(404).json({ error: 'Sophcode session not found', sessionId: safeSessionId });
+                    return res.status(404).json({ error: 'OpenCode session not found', sessionId: safeSessionId });
                 }
 
                 const inputTokens = Number(row.tokens_input || 0) + Number(row.tokens_cache_read || 0);

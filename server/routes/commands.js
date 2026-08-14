@@ -15,12 +15,13 @@ const APP_ROOT = findAppRoot(__dirname);
 
 const router = express.Router();
 
-const MODEL_PROVIDERS = ["claude", "codex", "sophcode"];
+const MODEL_PROVIDERS = ["claude", "codex", "opencode", "qoder"];
 
 const MODEL_PROVIDER_LABELS = {
   claude: "Claude",
   codex: "Codex",
-  sophcode: "Sophcode",
+  opencode: "OpenCode",
+  qoder: "Qoder",
 };
 
 const readModelProvider = (value) => {

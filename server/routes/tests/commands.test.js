@@ -4,7 +4,7 @@ import test from 'node:test';
 import { builtInCommands, executeModelsCommand } from '../commands.js';
 import { providerModelsService } from '../../modules/providers/services/provider-models.service.js';
 
-test('models command resolves sophcode as its own provider with a Sophcode label', async () => {
+test('models command resolves opencode as its own provider with an OpenCode label', async () => {
   const originalGetProviderModels = providerModelsService.getProviderModels;
   const originalGetCurrentActiveModel = providerModelsService.getCurrentActiveModel;
 
@@ -23,13 +23,13 @@ test('models command resolves sophcode as its own provider with a Sophcode label
 
   try {
     const result = await executeModelsCommand([], {
-      provider: 'sophcode',
+      provider: 'opencode',
       model: 'opencode/deepseek-v4-flash-free',
     });
 
-    assert.equal(result.data.current.provider, 'sophcode');
-    assert.equal(result.data.current.providerLabel, 'Sophcode');
-    assert.deepEqual(Object.keys(result.data.available), ['sophcode']);
+    assert.equal(result.data.current.provider, 'opencode');
+    assert.equal(result.data.current.providerLabel, 'OpenCode');
+    assert.deepEqual(Object.keys(result.data.available), ['opencode']);
     assert.ok(result.data.availableModels.includes('opencode/deepseek-v4-flash-free'));
   } finally {
     providerModelsService.getProviderModels = originalGetProviderModels;

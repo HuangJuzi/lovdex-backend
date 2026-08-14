@@ -20,7 +20,8 @@ export const sessionSynchronizerService = {
     const processedByProvider: Record<LLMProvider, number> = {
       claude: 0,
       codex: 0,
-      sophcode: 0,
+      opencode: 0,
+      qoder: 0,
     };
     const failures: string[] = [];
 
