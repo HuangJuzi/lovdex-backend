@@ -38,6 +38,10 @@ import {
     abortOpenCodeSession,
     queryOpenCode,
 } from './opencode-runner.js';
+import {
+    abortQoderSession,
+    queryQoder,
+} from './qoder-runner.js';
 import commandsRoutes from './routes/commands.js';
 import sessionsRoutes from './routes/sessions.js';
 import projectModuleRoutes from './modules/projects/projects.routes.js';
@@ -96,7 +100,7 @@ const spawnFns = {
     claude: queryClaudeSDK,
     codex: queryCodex,
     opencode: queryOpenCode,
-    // qoder（T7）: qoder-spawn added with the qoder runner
+    qoder: queryQoder,
 };
 
 // Single WebSocket server that handles chat.
@@ -111,7 +115,7 @@ const wss = createWebSocketServer(server, {
             claude: abortClaudeSDKSession,
             codex: abortCodexSession,
             opencode: abortOpenCodeSession,
-            // qoder（T7）
+            qoder: abortQoderSession,
         },
         resolveToolApproval,
         getPendingApprovalsForSession,
@@ -1199,6 +1203,24 @@ app.get('/api/projects/:projectId/sessions/:sessionId/token-usage', authenticate
             } finally {
                 db.close();
             }
+        }
+
+        // Handle Qoder sessions: qoder has no local sqlite token ledger — usage
+        // (credits/costUsd) is reported by the runtime's terminal `result`
+        // event, not a queryable store. Historical browsing returns a zeroed
+        // token structure so the UI keeps the same response shape.
+        if (provider === 'qoder') {
+            return res.json({
+                used: 0,
+                total: 0,
+                inputTokens: 0,
+                outputTokens: 0,
+                breakdown: {
+                    input: 0,
+                    output: 0
+                },
+                tokens: { inputTokens: 0, outputTokens: 0 },
+            });
         }
 
         // Handle Claude sessions (default)
