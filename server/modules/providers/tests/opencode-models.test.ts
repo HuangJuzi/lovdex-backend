@@ -1,21 +1,21 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { SophcodeProviderModels } from '@/modules/providers/list/sophcode/sophcode-models.provider.js';
+import { OpenCodeProviderModels } from '@/modules/providers/list/opencode/opencode-models.provider.js';
 
-test('sophcode models provider builds catalog from `sophcode models`', async () => {
-  const provider = new SophcodeProviderModels();
+test('opencode models provider builds catalog from `opencode models`', async () => {
+  const provider = new OpenCodeProviderModels();
   const def = await provider.getSupportedModels();
   assert.ok(def.OPTIONS.length > 0);
   assert.ok(def.OPTIONS.every((o) => o.value.includes('/')));
   assert.ok(def.DEFAULT.includes('/'));
 });
 
-test('sophcode models provider falls back to static catalog on spawn failure', async () => {
+test('opencode models provider falls back to static catalog on spawn failure', async () => {
   const originalPath = process.env.PATH;
   process.env.PATH = '/nonexistent';
   try {
-    const provider = new SophcodeProviderModels();
+    const provider = new OpenCodeProviderModels();
     const def = await provider.getSupportedModels();
     assert.ok(def.OPTIONS.length > 0);
   } finally {

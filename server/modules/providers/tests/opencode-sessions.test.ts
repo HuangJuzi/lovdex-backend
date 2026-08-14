@@ -6,7 +6,7 @@ import test from 'node:test';
 
 import Database from 'better-sqlite3';
 
-import { SophcodeSessionsProvider } from '@/modules/providers/list/sophcode/sophcode-sessions.provider.js';
+import { OpenCodeSessionsProvider } from '@/modules/providers/list/opencode/opencode-sessions.provider.js';
 
 const patchHomeDir = (nextHomeDir: string) => {
   const original = os.homedir;
@@ -14,8 +14,8 @@ const patchHomeDir = (nextHomeDir: string) => {
   return () => { (os as any).homedir = original; };
 };
 
-test('sophcode sessions normalizes a text part event', () => {
-  const provider = new SophcodeSessionsProvider();
+test('opencode sessions normalizes a text part event', () => {
+  const provider = new OpenCodeSessionsProvider();
   const raw = { type: 'text', part: { type: 'text', text: 'hello', messageID: 'msg1', sessionID: 'ses1' } };
   const msgs = provider.normalizeMessage(raw, 'ses1');
   assert.equal(msgs.length, 1);
@@ -24,8 +24,8 @@ test('sophcode sessions normalizes a text part event', () => {
   assert.equal(msgs[0].content, 'hello');
 });
 
-test('sophcode sessions fetchHistory reads message/part JSON data from opencode.db', async () => {
-  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'sophcode-sessions-'));
+test('opencode sessions fetchHistory reads message/part JSON data from opencode.db', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'opencode-sessions-'));
   const dataDir = path.join(tempRoot, '.local', 'share', 'opencode');
   await fs.mkdir(dataDir, { recursive: true });
   const db = new Database(path.join(dataDir, 'opencode.db'));
@@ -43,7 +43,7 @@ test('sophcode sessions fetchHistory reads message/part JSON data from opencode.
 
   const restore = patchHomeDir(tempRoot);
   try {
-    const result = await new SophcodeSessionsProvider().fetchHistory('ses1');
+    const result = await new OpenCodeSessionsProvider().fetchHistory('ses1');
     assert.equal(result.total, 2);
     assert.equal(result.messages[0].role, 'user');
     assert.equal(result.messages[0].content, 'quoted user text');
@@ -54,8 +54,8 @@ test('sophcode sessions fetchHistory reads message/part JSON data from opencode.
   }
 });
 
-test('sophcode sessions fetchHistory queries opencode.db with options.providerSessionId, not the app session id', async () => {
-  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'sophcode-sessions-'));
+test('opencode sessions fetchHistory queries opencode.db with options.providerSessionId, not the app session id', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'opencode-sessions-'));
   const dataDir = path.join(tempRoot, '.local', 'share', 'opencode');
   await fs.mkdir(dataDir, { recursive: true });
   const db = new Database(path.join(dataDir, 'opencode.db'));
@@ -76,7 +76,7 @@ test('sophcode sessions fetchHistory queries opencode.db with options.providerSe
     // The app session id is a lovdex UUID; the provider-native id lives in
     // options.providerSessionId. Querying opencode.db with the app id must not
     // silently return nothing.
-    const result = await new SophcodeSessionsProvider().fetchHistory('app-session-uuid', {
+    const result = await new OpenCodeSessionsProvider().fetchHistory('app-session-uuid', {
       providerSessionId: 'ses1',
     });
     assert.equal(result.total, 2);

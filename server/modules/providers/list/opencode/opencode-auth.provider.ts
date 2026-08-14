@@ -7,10 +7,10 @@ import type { IProviderAuth } from '@/shared/interfaces.js';
 import type { ProviderAuthStatus } from '@/shared/types.js';
 import { readObjectRecord } from '@/shared/utils.js';
 
-export class SophcodeProviderAuth implements IProviderAuth {
+export class OpenCodeProviderAuth implements IProviderAuth {
   private checkInstalled(): boolean {
     try {
-      spawnSync('sophcode', ['--version'], { stdio: 'ignore', timeout: 5000 });
+      spawnSync('opencode', ['--version'], { stdio: 'ignore', timeout: 5000 });
       return true;
     } catch {
       return false;
@@ -45,7 +45,7 @@ export class SophcodeProviderAuth implements IProviderAuth {
 
     return {
       installed,
-      provider: 'sophcode',
+      provider: 'opencode',
       authenticated,
       email,
       method,

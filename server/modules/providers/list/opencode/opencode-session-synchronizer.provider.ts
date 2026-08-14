@@ -8,9 +8,9 @@ import { sessionsDb } from '@/modules/database/index.js';
 import type { IProviderSessionSynchronizer } from '@/shared/interfaces.js';
 import { readOptionalString } from '@/shared/utils.js';
 
-const PROVIDER = 'sophcode';
+const PROVIDER = 'opencode';
 
-type SophcodeSessionRow = {
+type OpenCodeSessionRow = {
   id: string;
   title?: string;
   directory?: string;
@@ -19,7 +19,7 @@ type SophcodeSessionRow = {
   time_updated?: number;
 };
 
-export class SophcodeSessionSynchronizer implements IProviderSessionSynchronizer {
+export class OpenCodeSessionSynchronizer implements IProviderSessionSynchronizer {
   private openDb(): Database.Database {
     const dbPath = path.join(os.homedir(), '.local', 'share', 'opencode', 'opencode.db');
     return new Database(dbPath, { readonly: true, fileMustExist: true });
@@ -41,7 +41,7 @@ export class SophcodeSessionSynchronizer implements IProviderSessionSynchronizer
     try {
       const rows = db.prepare(
         `SELECT id, title, directory, path, time_created, time_updated FROM session WHERE time_archived IS NULL`,
-      ).all() as SophcodeSessionRow[];
+      ).all() as OpenCodeSessionRow[];
 
       for (const row of rows) {
         // opencode v0.3.0 stores the real working directory in `directory`;

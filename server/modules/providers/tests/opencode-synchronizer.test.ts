@@ -9,7 +9,7 @@ import Database from 'better-sqlite3';
 import { closeConnection } from '@/modules/database/connection.js';
 import { initializeDatabase } from '@/modules/database/init-db.js';
 import { sessionsDb } from '@/modules/database/index.js';
-import { SophcodeSessionSynchronizer } from '@/modules/providers/list/sophcode/sophcode-session-synchronizer.provider.js';
+import { OpenCodeSessionSynchronizer } from '@/modules/providers/list/opencode/opencode-session-synchronizer.provider.js';
 
 const patchHomeDir = (nextHomeDir: string) => {
   const original = os.homedir;
@@ -23,7 +23,7 @@ const patchHomeDir = (nextHomeDir: string) => {
  */
 async function withIsolatedLovdexDb(runTest: () => void | Promise<void>): Promise<void> {
   const previousDatabasePath = process.env.DATABASE_PATH;
-  const tempDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'sophcode-sync-lovdex-'));
+  const tempDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'opencode-sync-lovdex-'));
   const databasePath = path.join(tempDirectory, 'auth.db');
 
   closeConnection();
@@ -52,20 +52,20 @@ async function createOpencodeDb(tempRoot: string, schema: string, rows: string):
   db.close();
 }
 
-test('sophcode synchronizer upserts sessions from opencode.db', async () => {
+test('opencode synchronizer upserts sessions from opencode.db', async () => {
   await withIsolatedLovdexDb(async () => {
-    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'sophcode-sync-'));
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'opencode-sync-'));
     await createOpencodeDb(
       tempRoot,
       `CREATE TABLE session (id TEXT PRIMARY KEY, title TEXT, directory TEXT, path TEXT, time_archived INTEGER, time_created INTEGER, time_updated INTEGER);`,
       `INSERT INTO session (id, title, directory, path, time_archived, time_created, time_updated) VALUES
-        ('ses_active', 'My Sophcode Chat', '/tmp', '', NULL, 1720000000000, 1720000000000),
+        ('ses_active', 'My OpenCode Chat', '/tmp', '', NULL, 1720000000000, 1720000000000),
         ('ses_archived', 'Archived', '/tmp', '', 1720000000000, 1720000000000, 1720000000000);`,
     );
 
     const restore = patchHomeDir(tempRoot);
     try {
-      const synchronizer = new SophcodeSessionSynchronizer();
+      const synchronizer = new OpenCodeSessionSynchronizer();
       const count = await synchronizer.synchronize();
       // Only the non-archived row is scanned.
       assert.equal(count, 1);
@@ -75,9 +75,9 @@ test('sophcode synchronizer upserts sessions from opencode.db', async () => {
   });
 });
 
-test('sophcode synchronizer prefers the directory column over path (new opencode schema)', async () => {
+test('opencode synchronizer prefers the directory column over path (new opencode schema)', async () => {
   await withIsolatedLovdexDb(async () => {
-    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'sophcode-sync-'));
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'opencode-sync-'));
     // opencode v0.3.0 stores the real working directory in `directory`; `path`
     // is the git-relative subpath, which is empty at a repo root.
     await createOpencodeDb(
@@ -90,7 +90,7 @@ test('sophcode synchronizer prefers the directory column over path (new opencode
 
     const restore = patchHomeDir(tempRoot);
     try {
-      const synchronizer = new SophcodeSessionSynchronizer();
+      const synchronizer = new OpenCodeSessionSynchronizer();
       await synchronizer.synchronize();
 
       const row1 = sessionsDb.getSessionByProviderSessionId('ses_1');
@@ -107,12 +107,12 @@ test('sophcode synchronizer prefers the directory column over path (new opencode
   });
 });
 
-test('sophcode synchronizer returns 0 when opencode.db is absent', async () => {
+test('opencode synchronizer returns 0 when opencode.db is absent', async () => {
   await withIsolatedLovdexDb(async () => {
-    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'sophcode-sync-'));
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'opencode-sync-'));
     const restore = patchHomeDir(tempRoot);
     try {
-      const count = await new SophcodeSessionSynchronizer().synchronize();
+      const count = await new OpenCodeSessionSynchronizer().synchronize();
       assert.equal(count, 0);
     } finally {
       restore();

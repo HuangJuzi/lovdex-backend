@@ -10,9 +10,9 @@ import {
 
 const COMPAT_DIRS = ['.opencode', '.claude', '.agents'];
 
-export class SophcodeSkillsProvider extends SkillsProvider {
+export class OpenCodeSkillsProvider extends SkillsProvider {
   constructor() {
-    super('sophcode');
+    super('opencode');
   }
 
   protected async getSkillSources(workspacePath: string): Promise<ProviderSkillSource[]> {

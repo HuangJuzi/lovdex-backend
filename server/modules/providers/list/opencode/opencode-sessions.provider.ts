@@ -12,7 +12,7 @@ import {
   unwrapJsonStringLiteral,
 } from '@/shared/utils.js';
 
-const PROVIDER = 'sophcode';
+const PROVIDER = 'opencode';
 
 type MessageRow = { id: string; data?: string };
 type PartRow = { message_id: string; data?: string };
@@ -28,7 +28,7 @@ function parseData(data: string | null | undefined): AnyRecord | null {
   }
 }
 
-function openSophcodeDb(): Database.Database {
+function openOpenCodeDb(): Database.Database {
   const dbPath = path.join(os.homedir(), '.local', 'share', 'opencode', 'opencode.db');
   return new Database(dbPath, { readonly: true, fileMustExist: true });
 }
@@ -60,7 +60,7 @@ function loadMessagesForSession(db: Database.Database, providerSessionId: string
   });
 }
 
-export class SophcodeSessionsProvider implements IProviderSessions {
+export class OpenCodeSessionsProvider implements IProviderSessions {
   normalizeMessage(raw: unknown, sessionId: string | null): NormalizedMessage[] {
     const event = readObjectRecord(raw);
     if (!event) {
@@ -92,7 +92,7 @@ export class SophcodeSessionsProvider implements IProviderSessions {
     // callers (tests, direct use) pass the provider id as the session id.
     const providerSessionId = options.providerSessionId ?? sessionId;
     try {
-      const db = openSophcodeDb();
+      const db = openOpenCodeDb();
       try {
         const rawMessages = loadMessagesForSession(db, providerSessionId);
         const normalized: NormalizedMessage[] = rawMessages.map((raw) =>

@@ -18,14 +18,14 @@ import {
   writeProviderSessionActiveModelChange,
 } from '@/shared/utils.js';
 
-export const SOPHCODE_FALLBACK_MODELS: ProviderModelsDefinition = {
+export const OPENCODE_FALLBACK_MODELS: ProviderModelsDefinition = {
   OPTIONS: [{ value: 'opencode/deepseek-v4-flash-free', label: 'opencode/deepseek-v4-flash-free' }],
   DEFAULT: 'opencode/deepseek-v4-flash-free',
 };
 
-export function runSophcodeModels(): string[] {
+export function runOpenCodeModels(): string[] {
   try {
-    const result = spawnSync('sophcode', ['models'], { encoding: 'utf8', timeout: 15000 });
+    const result = spawnSync('opencode', ['models'], { encoding: 'utf8', timeout: 15000 });
     if (result.status !== 0 || !result.stdout) {
       return [];
     }
@@ -38,10 +38,10 @@ export function runSophcodeModels(): string[] {
   }
 }
 
-export function buildSophcodeModelsDefinition(): ProviderModelsDefinition {
-  const lines = runSophcodeModels();
+export function buildOpenCodeModelsDefinition(): ProviderModelsDefinition {
+  const lines = runOpenCodeModels();
   if (lines.length === 0) {
-    return SOPHCODE_FALLBACK_MODELS;
+    return OPENCODE_FALLBACK_MODELS;
   }
   const seenValues = new Set<string>();
   const options: ProviderModelOption[] = [];
@@ -52,10 +52,10 @@ export function buildSophcodeModelsDefinition(): ProviderModelsDefinition {
     seenValues.add(value);
     options.push({ value, label: value });
   }
-  return { OPTIONS: options, DEFAULT: options[0]?.value ?? SOPHCODE_FALLBACK_MODELS.DEFAULT };
+  return { OPTIONS: options, DEFAULT: options[0]?.value ?? OPENCODE_FALLBACK_MODELS.DEFAULT };
 }
 
-export function readSophcodeSessionModel(sessionId?: string): string | null {
+export function readOpenCodeSessionModel(sessionId?: string): string | null {
   if (!sessionId) {
     return null;
   }
@@ -78,13 +78,13 @@ export function readSophcodeSessionModel(sessionId?: string): string | null {
   }
 }
 
-export class SophcodeProviderModels implements IProviderModels {
+export class OpenCodeProviderModels implements IProviderModels {
   async getSupportedModels(): Promise<ProviderModelsDefinition> {
-    return buildSophcodeModelsDefinition();
+    return buildOpenCodeModelsDefinition();
   }
 
   async getCurrentActiveModel(sessionId?: string): Promise<ProviderCurrentActiveModel> {
-    const model = readSophcodeSessionModel(sessionId);
+    const model = readOpenCodeSessionModel(sessionId);
     if (model) {
       return { model };
     }
@@ -94,6 +94,6 @@ export class SophcodeProviderModels implements IProviderModels {
   async changeActiveModel(
     input: ProviderChangeActiveModelInput,
   ): Promise<ProviderSessionActiveModelChange> {
-    return writeProviderSessionActiveModelChange('sophcode', input);
+    return writeProviderSessionActiveModelChange('opencode', input);
   }
 }

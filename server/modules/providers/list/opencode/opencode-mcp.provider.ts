@@ -88,9 +88,9 @@ const writeJsonConfig = async (filePath: string, data: Record<string, unknown>):
   await writeFile(filePath, JSON.stringify(data, null, 2), 'utf8');
 };
 
-export class SophcodeMcpProvider extends McpProvider {
+export class OpenCodeMcpProvider extends McpProvider {
   constructor() {
-    super('sophcode', ['user', 'project'], ['stdio', 'http']);
+    super('opencode', ['user', 'project'], ['stdio', 'http']);
   }
 
   private configPath(scope: McpScope, workspacePath: string): string {
@@ -153,7 +153,7 @@ export class SophcodeMcpProvider extends McpProvider {
     if (config.type === 'local' || Array.isArray(config.command)) {
       const commandArr = readStringArray(config.command) ?? [];
       return {
-        provider: 'sophcode',
+        provider: 'opencode',
         name,
         scope,
         transport: 'stdio',
@@ -164,7 +164,7 @@ export class SophcodeMcpProvider extends McpProvider {
     }
     if (config.type === 'remote' || typeof config.url === 'string') {
       return {
-        provider: 'sophcode',
+        provider: 'opencode',
         name,
         scope,
         transport: 'http',
