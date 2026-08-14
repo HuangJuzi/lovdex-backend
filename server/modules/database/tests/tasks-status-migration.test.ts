@@ -258,12 +258,14 @@ test('fresh install creates tasks table with sub_status and no verdict column', 
 // Sophcode-era shape: sub_status present, 'sophcode' in the executor CHECK, no
 // source_schedule_id column, label CHECK still the OLD 6-value list (no
 // 'reminder'), and the sub_status CHECK without waiting_answer / waiting_plan.
-// This DDL DOES trip the opencode provider rebuild — the executor gate rebuilds
-// first because 'opencode' is absent from the CHECK, renaming sophcode →
-// opencode inside its INSERT...SELECT — then the waiting_* rebuild, then
-// finally the reminder label gate rebuild. The row assertions below confirm
-// every column, including executor_provider mutated to 'opencode', survives the
-// full rename→recreate→copy chain.
+// This DDL trips ONLY the opencode provider rebuild: the executor gate fires
+// because 'opencode' is absent from the CHECK, renaming sophcode → opencode
+// inside its INSERT...SELECT. That rebuild re-creates tasks from the current
+// TASKS_TABLE_SCHEMA_SQL (which already carries 'waiting_answer' and
+// 'reminder'), so the waiting_*/reminder CHECKs ride along with the new DDL and
+// the down-chain waiting/label gates re-fetch it → no-ops. The row assertions
+// below confirm every column, including executor_provider mutated to
+// 'opencode', survives the rename→recreate→copy chain.
 const SOPHCODE_ERA_TASKS_DDL = `
 CREATE TABLE tasks (
     task_id           TEXT PRIMARY KEY NOT NULL,

@@ -401,19 +401,22 @@ export async function queryQoder(command, options = {}, ws) {
       activeQoderProcesses.delete(processKey);
 
       const installed = await providerAuthService.isProviderInstalled('qoder');
-      const errorContent = !installed
-        ? 'Qoder CLI is not installed. Install it with: npm i -g @qoder-ai/qodercli'
-        : error.message;
-      if (!installed) {
+      if (!installed && !notInstalledSent) {
         notInstalledSent = true;
+        sendMessage(ws, createNormalizedMessage({
+          kind: 'error',
+          content: 'Qoder CLI is not installed. Install it with: npm i -g @qoder-ai/qodercli',
+          sessionId: finalSessionId,
+          provider: 'qoder',
+        }));
+      } else {
+        sendMessage(ws, createNormalizedMessage({
+          kind: 'error',
+          content: error.message,
+          sessionId: finalSessionId,
+          provider: 'qoder',
+        }));
       }
-
-      sendMessage(ws, createNormalizedMessage({
-        kind: 'error',
-        content: errorContent,
-        sessionId: finalSessionId,
-        provider: 'qoder',
-      }));
       if (!completeSent && !qoderProcess.aborted) {
         completeSent = true;
         sendMessage(ws, createCompleteMessage({ provider: 'qoder', sessionId: finalSessionId, exitCode: 1 }));
