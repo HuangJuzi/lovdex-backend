@@ -40,7 +40,9 @@ import {
 } from './opencode-runner.js';
 import {
     abortQoderSession,
+    getQoderPendingApprovalsForSession,
     queryQoder,
+    resolveQoderToolApproval,
 } from './qoder-runner.js';
 import commandsRoutes from './routes/commands.js';
 import sessionsRoutes from './routes/sessions.js';
@@ -117,8 +119,18 @@ const wss = createWebSocketServer(server, {
             opencode: abortOpenCodeSession,
             qoder: abortQoderSession,
         },
-        resolveToolApproval,
-        getPendingApprovalsForSession,
+        // Pending tool approvals may be owned by either interactive provider
+        // (Claude's SDK callback or Qoder's stdio control protocol). Request
+        // ids are globally-unique UUIDs, so dispatching to both resolvers is
+        // safe — the one that does not own the request is a no-op.
+        resolveToolApproval: (requestId, payload) => {
+            resolveToolApproval(requestId, payload);
+            resolveQoderToolApproval(requestId, payload);
+        },
+        getPendingApprovalsForSession: (providerSessionId) => [
+            ...getPendingApprovalsForSession(providerSessionId),
+            ...getQoderPendingApprovalsForSession(providerSessionId),
+        ],
     },
     terminal: {
         spawnPty: (shell, args, options) => pty.spawn(shell, args, options),
