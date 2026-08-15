@@ -241,6 +241,15 @@ export const sessionsDb = {
     ).run(summary, sessionId);
   },
 
+  updateSessionJsonlPath(sessionId: string, jsonlPath: string): void {
+    const db = getConnection();
+    db.prepare(
+      `UPDATE sessions
+       SET jsonl_path = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE session_id = ? AND (jsonl_path IS NULL OR jsonl_path = '')`
+    ).run(jsonlPath, sessionId);
+  },
+
   getSessionById(sessionId: string): SessionRow | null {
     const db = getConnection();
     const row = db
@@ -311,6 +320,51 @@ export const sessionsDb = {
          LIMIT 1`
       )
       .get(provider, normalizedProjectPath) as SessionRow | undefined;
+
+    return normalizeSessionRow(row) ?? null;
+  },
+
+  /**
+   * Finds a recently-created, still-unused operator session for dedup.
+   *
+   * The new-session dialog single-flights its POST on the client, but a second
+   * client (or a duplicated request that slips past the guard) would otherwise
+   * allocate a second empty operator session. This lets the session gateway
+   * return the session it just created instead of minting a duplicate, keyed by
+   * provider + workspace and scoped to a short window so a later deliberate
+   * "new session" still creates a fresh one.
+   *
+   * "Unused" means `provider_session_id IS NULL`: the provider runtime has not
+   * announced a transcript id yet, so no conversation ever started in it.
+   * `created_at` is stored via SQLite `CURRENT_TIMESTAMP` ("YYYY-MM-DD HH:MM:SS"
+   * UTC), so the cutoff is formatted to the same shape for a lexicographic
+   * comparison.
+   */
+  findRecentPendingOperatorSession(
+    provider: string,
+    projectPath: string,
+    windowMs: number,
+  ): SessionRow | null {
+    const db = getConnection();
+    const normalizedProjectPath = normalizeProjectPathForProvider(provider, projectPath);
+    const cutoff = new Date(Date.now() - windowMs)
+      .toISOString()
+      .slice(0, 19)
+      .replace('T', ' ');
+    const row = db
+      .prepare(
+        `SELECT ${SESSION_ROW_COLUMNS}
+         FROM sessions
+         WHERE provider = ?
+           AND project_path = ?
+           AND provider_session_id IS NULL
+           AND is_operator = 1
+           AND isArchived = 0
+           AND created_at >= ?
+         ORDER BY datetime(created_at) DESC, session_id DESC
+         LIMIT 1`
+      )
+      .get(provider, normalizedProjectPath, cutoff) as SessionRow | undefined;
 
     return normalizeSessionRow(row) ?? null;
   },

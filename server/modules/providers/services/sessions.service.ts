@@ -21,6 +21,16 @@ type CreateAppSessionResult = {
   projectPath: string;
 };
 
+/**
+ * Dedup window for operator-session creation (see `findRecentPendingOperatorSession`).
+ * A duplicated `POST /api/providers/sessions` (double-click / second client /
+ * StrictMode remount racing past the client single-flight) that lands within
+ * this window reuses the session it just created instead of minting another
+ * empty row. Deliberate "new session" intents are naturally spaced out well
+ * beyond this window (open dialog → confirm → open session → repeat).
+ */
+const OPERATOR_SESSION_DEDUP_WINDOW_MS = 10_000;
+
 type ArchivedSessionListItem = {
   sessionId: string;
   provider: LLMProvider;
@@ -134,6 +144,25 @@ export const sessionsService = {
         code: 'PROJECT_PATH_REQUIRED',
         statusCode: 400,
       });
+    }
+
+    // Dedup the operator-assistant gateway: a duplicate POST landing within the
+    // window reuses the just-created (still-unused) operator session rather than
+    // allocating a second empty row. Regular project sessions are keyed by the
+    // composer on first message send and don't need this guard.
+    if (isOperator) {
+      const recent = sessionsDb.findRecentPendingOperatorSession(
+        provider,
+        normalizedProjectPath,
+        OPERATOR_SESSION_DEDUP_WINDOW_MS,
+      );
+      if (recent) {
+        return {
+          sessionId: recent.session_id,
+          provider,
+          projectPath: normalizedProjectPath,
+        };
+      }
     }
 
     const sessionId = randomUUID();
