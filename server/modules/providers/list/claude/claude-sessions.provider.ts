@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
 
@@ -9,6 +10,44 @@ import { createNormalizedMessage, generateMessageId, readObjectRecord, sliceTail
 import { sessionsDb } from '@/modules/database/index.js';
 
 const PROVIDER = 'claude';
+
+/**
+ * Claude Code names each project's transcript directory by encoding the cwd:
+ * every character outside [a-zA-Z0-9-] becomes '-' (so '/', '.', and '_' all
+ * collapse into dashes), e.g. `/mnt/b/workdir` -> `-mnt-b-workdir`.
+ */
+function encodeClaudeProjectDirName(projectPath: string): string {
+  return projectPath.replace(/[^a-zA-Z0-9-]/g, '-');
+}
+
+/**
+ * Resolves the on-disk transcript path for a provider session under
+ * `~/.claude/projects` from the session's project path, without relying on the
+ * watcher to have indexed it. Returns null when no such file exists.
+ */
+export function resolveClaudeTranscriptPath(
+  projectPath: string,
+  providerSessionId: string,
+  claudeHome: string = path.join(os.homedir(), '.claude'),
+): string | null {
+  if (!projectPath || !providerSessionId) {
+    return null;
+  }
+  const candidate = path.join(
+    claudeHome,
+    'projects',
+    encodeClaudeProjectDirName(projectPath),
+    `${providerSessionId}.jsonl`,
+  );
+  try {
+    if (fs.statSync(candidate).isFile()) {
+      return candidate;
+    }
+  } catch {
+    // fall through
+  }
+  return null;
+}
 
 type ClaudeToolResult = {
   content: unknown;
@@ -110,7 +149,21 @@ async function getSessionMessages(
   try {
     // The DB row is keyed by the app-facing session id, while the JSONL rows
     // on disk carry the provider-native id — both ids are needed here.
-    const jsonLPath = sessionsDb.getSessionById(sessionId)?.jsonl_path;
+    const session = sessionsDb.getSessionById(sessionId);
+    let jsonLPath = session?.jsonl_path ?? null;
+
+    // App-created rows only receive jsonl_path through the disk-watcher index.
+    // A run whose transcript was never indexed (failed early, or the file's
+    // first records carry no cwd so the indexer skips it) leaves it NULL, and
+    // returning empty here makes the session read as blank even though the
+    // provider id exists. Derive the location from the row's project path and
+    // backfill the row so later reads skip this branch.
+    if (!jsonLPath && session?.project_path) {
+      jsonLPath = resolveClaudeTranscriptPath(session.project_path, providerSessionId);
+      if (jsonLPath) {
+        sessionsDb.updateSessionJsonlPath(sessionId, jsonLPath);
+      }
+    }
 
     if (!jsonLPath) {
       return { messages: [], total: 0, hasMore: false };

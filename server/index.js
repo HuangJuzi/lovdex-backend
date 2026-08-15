@@ -265,7 +265,11 @@ const createAppSession = (provider, projectPath, isOperator) =>
 // null. Prompt mirrors taskPromptOf (description falling back to title).
 const startTaskRun = (taskId, sessionId) => {
     const task = tasksService.getTask(taskId);
-    const content = (task?.description ?? '').trim() || task?.title || '';
+    let content = (task?.description ?? '').trim() || task?.title || '';
+    // Mirror taskPromptOf's slash guard: a leading "/" would make the provider
+    // CLI parse the whole task prompt as a command and end the run with no
+    // output, leaving an empty session.
+    if (content.startsWith('/')) content = `执行以下任务：\n${content}`;
     return startHeadlessTaskRun(sessionId, {
         content,
         model: task?.executor_model ?? null,
